@@ -1,0 +1,15 @@
+pg:
+  drivername: postgres
+  image_backend:
+    database: egistic_2.0
+    host: localhost
+    port: 5432
+    username: postgres
+    password: postgres
+  meteo:
+    database: meteo
+    host: localhost
+    port: 5432
+    username: postgres
+    password: postgres
+

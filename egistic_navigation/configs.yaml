@@ -1,0 +1,16 @@
+pg:
+  drivername: postgres
+
+  image_backend:
+    database: egistic_2.0
+    host: db_default
+    port: 5432
+    username: docker
+    password: docker
+  meteo:
+    database: meteo
+    host: db_weathers
+    port: 5432
+    username: docker
+    password: docker
+
