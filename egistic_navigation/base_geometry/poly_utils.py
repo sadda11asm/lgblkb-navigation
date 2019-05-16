@@ -1,0 +1,562 @@
+import collections
+import itertools
+from typing import Iterable
+
+import gc
+import more_itertools as mi
+import networkx as nx
+import numpy as np
+import pandas as pd
+from box import Box
+from matplotlib import pyplot as plt,pyplot
+from matplotlib.patches import PathPatch
+from shapely import geometry as shg,ops as shops
+from sklearn.cluster import KMeans
+
+from egistic_navigation.base_geometry.geom_utils import GenericGeometry,get_from_geojson,line_xy,pathify,is_clockwise,generate_cells,min_dist
+from egistic_navigation.base_geometry.line_utils import TheLine
+from egistic_navigation.global_support import simple_logger
+from egistic_navigation.katana_case import katana
+from egistic_navigation.utils.google_way import SimpleTSP
+from lgblkb_tools import geometry as gmtr
+from lgblkb_tools.log_support import with_logging
+
+class ThePoly(GenericGeometry):
+	
+	def __init__(self,polygon,**box_kwargs):
+		super(ThePoly,self).__init__(**box_kwargs)
+		if isinstance(polygon,shg.Polygon):
+			self.polygon: shg.Polygon=polygon
+		else:
+			self.polygon: shg.Polygon=shg.Polygon(polygon)
+		self._generate_id(self.polygon)
+		if not self.p.is_valid:
+			# self.plot()
+			# plt.show()
+			# raise AssertionError(f"Polygon {self.polygon} is not a valid polygon.")
+			simple_logger.warning(f"Polygon %s is not a valid polygon.",self.polygon)
+		
+		self.__xy=None
+		self.__holes=None
+		self.__cover_line_length=None
+		self.__bounds_xy=None
+		self.__lims=None
+		self.__is_ok=None
+		self.__isclockwise=None
+		self.is_multilinestring=isinstance(self.polygon.boundary,shg.MultiLineString)
+		
+		self.__is_convex=None
+		# self.__graph_with_the_points=None
+		self.__convex_hull=None
+		self.__holes_xy=None
+		self.__holes=None
+		
+		self.__exterior_lines=list()
+		self.__box=Box(box_kwargs)
+	
+	# region Class methods:
+	@classmethod
+	def from_tsp(cls,cities_count=10,seed=None,city_locator=None,**box_kwargs):
+		np.random.seed(seed)
+		if city_locator is None: city_locator=lambda x:x
+		points=city_locator(np.random.rand(cities_count,2))
+		stsp=SimpleTSP(points)
+		route=stsp.run(depot=0,show=False)
+		the_poly=cls(points[route],**box_kwargs)
+		return the_poly
+	
+	@classmethod
+	def synthesize(cls,cities_count,poly_extent=1000,hole_count=1,seed=None):
+		np.random.seed(seed)
+		try_count=0
+		while True:
+			try_count+=1
+			simple_logger.info('Try main_poly: %s',try_count)
+			seed=np.random.randint(100000000)
+			try:
+				unholy_field=cls.from_tsp(cities_count=cities_count,seed=seed,city_locator=lambda ps:ps*poly_extent)
+				if hole_count<1: return unholy_field
+				# holes_current_count=0
+				holes=list()
+				
+				for i in range(1000):
+					#.plot()
+					seed=np.random.randint(100000000)
+					hole=cls.from_tsp(cities_count=np.random.randint(4,10),seed=seed,
+					                  city_locator=lambda ps:ps*np.random.randint(poly_extent/20,poly_extent*0.3)+
+					                                         np.random.randint(poly_extent*0.1,poly_extent*0.9,2))
+					# holy_poly=shg.Polygon(unholy_field.xy,[hole.xy,*map(lambda h:h.xy,holes)])
+					# hole.plot()
+					
+					# simple_logger.debug('unholy_field.p.contains(hole.p): %s',unholy_field.p.contains(hole.p))
+					# simple_logger.debug('unholy_field.p.intersects(hole.p): %s',unholy_field.p.intersects(hole.p))
+					if not unholy_field.p.contains(hole.p): continue
+					
+					# 	simple_logger.debug('Contains!!!')
+					# if unholy_field.p.intersects(hole.p):
+					# 	simple_logger.debug('Intersects!!!')
+					# if (not unholy_field.p.contains(hole.p)) or unholy_field.p.intersects(hole.p):
+					# 	continue
+					# hole.plot()
+					# unholy_field.plot()
+					# plt.show()
+					hole_friendly=True
+					for other_hole in holes:
+						# simple_logger.debug('other_hole.p.intersects(hole.p):\n%s',other_hole.p.intersects(hole.p))
+						# simple_logger.debug('other_hole.p.within(hole.p):\n%s',other_hole.p.within(hole.p))
+						if other_hole.p.intersects(hole.p) or other_hole.p.within(hole.p):
+							hole_friendly=False
+							break
+					if not hole_friendly: continue
+					
+					holes.append(hole)
+					holy_poly=shg.Polygon(unholy_field.xy,list(map(lambda x:x.xy,holes)))  #.buffer(0)
+					
+					# if not holy_poly.is_valid:
+					# 	holes.pop()
+					# 	continue
+					
+					holy_field=cls(holy_poly,area=holy_poly.area)
+					
+					simple_logger.debug('Proper hole created at i = %s',i)
+					# holy_field.plot()
+					# unholy_field.plot()
+					# plt.show()
+					
+					if len(holy_field.holes)==hole_count:
+						# if holes_current_count==hole_count:
+						gc.collect()
+						return holy_field
+				gc.collect()
+			# if holy_field.is_multilinestring:
+			# 	# holes_current_count+=1
+			# 	# simple_logger.debug('holy_field:\n%s',holy_field)
+			# 	# the_hole.plot()
+			# 	# unholy_field.plot()
+			# 	# plt.show()
+			# 	# holes.append(the_hole)
+			# 	# simple_logger.debug('Hole %s added.',hole_count)
+			# 	# holy_field=cls(shg.Polygon(unholy_field.xy,holes=list(map(lambda x:x.xy,holes))))#.plot(c='r')
+			# 	if len(holy_field.holes)==hole_count:
+			# 		# if holes_current_count==hole_count:
+			# 		return holy_field
+			except Exception as exc:
+				simple_logger.debug('exc:\n%s',exc)
+				pass
+	
+	@classmethod
+	def from_geojson(cls,filepath,**box_kwargs):
+		return cls(get_from_geojson(filepath)[0],**box_kwargs)
+	
+	# endregion
+	
+	def original_poly(self):
+		if not self.__box.get('__toy_poly_scale__'):
+			raise AttributeError('The polygon is not a toy. Original polygon does not exist.',dict(polygon=str(self)))
+		return self.__class__(self.xy/self.__box['__toy_poly_scale__']+self.__box['__toy_poly_mean_xy__'])
+	
+	def toy_poly(self,scale=1e-3):
+		mean_xy=np.mean(self.xy,axis=0)
+		zero_mean_xy=self.xy-mean_xy
+		# print(zero_mean_xy)
+		scaled_xy=zero_mean_xy*scale
+		crop_field=self.__class__(scaled_xy,__toy_poly_scale__=scale,__toy_poly_mean_xy__=mean_xy)  #.plot()
+		return crop_field
+	
+	@property
+	def p(self):
+		return self.polygon
+	
+	def plot(self,text=None,**kwargs):
+		gmtr.plot_polygon(self.polygon,**dict(dict(c='gray'),**kwargs))
+		if text is not None: plt.text(*np.array(self.polygon.centroid.xy),s=text)
+		return self
+	
+	def buffer(self,distance,resolution=16,quadsegs=None,cap_style=shg.CAP_STYLE.round,
+	           join_style=shg.JOIN_STYLE.round,mitre_limit=5.0):
+		return self.__class__(self.polygon.buffer(distance,resolution=resolution,quadsegs=quadsegs,
+		                                          cap_style=cap_style,join_style=join_style,mitre_limit=mitre_limit))
+	
+	@property
+	def holes(self):
+		if self.__holes is None:
+			if isinstance(self.p.boundary,shg.MultiLineString):
+				self.__holes=[self.__class__(x) for x in self.p.boundary[1:]]
+			else:
+				self.__holes=[]
+		return self.__holes
+	
+	@property
+	def holes_xy(self):
+		if self.__holes_xy is None:
+			if isinstance(self.polygon.boundary,shg.MultiLineString):
+				self.__holes_xy=[line_xy(x) for x in self.polygon.boundary[1:]]
+			else:
+				self.__holes_xy=[]
+		return self.__holes_xy
+	
+	@property
+	def all_xy(self):
+		return np.concatenate([self.xy[:-1],*[x[:-1] for x in self.holes_xy]])
+	
+	@property
+	def xy(self):
+		if self.__xy is None:
+			if self.is_multilinestring:
+				self.__xy=line_xy(self.polygon.boundary[0])
+			else:
+				self.__xy=line_xy(self.polygon.boundary)
+		return self.__xy
+	
+	@property
+	def bounds_xy(self):
+		if self.__bounds_xy is None:
+			self.__bounds_xy=line_xy(self.polygon.envelope.boundary)
+		return self.__bounds_xy
+	
+	@property
+	def exterior_lines(self):
+		if not self.__exterior_lines: self.__exterior_lines=self.get_exterior_lines()
+		return self.__exterior_lines
+	
+	def get_exterior_lines(self,as_the_line=True,show=0,**box_kwargs):
+		lines=list()
+		if as_the_line: line_getter=lambda _line:TheLine(_line,parent=self,is_exterior=True,**box_kwargs)
+		else: line_getter=lambda _line:_line
+		current_chunk=self.polygon.boundary[0] if self.is_multilinestring else self.polygon.boundary
+		for xy in self.xy[1:-1]:
+			# ThePoint(xy).plot()
+			line,current_chunk=shops.split(current_chunk,shg.Point(xy))
+			lines.append(line_getter(line))
+		lines.append(line_getter(current_chunk))
+		if show:
+			for line in lines:
+				if as_the_line: line.plot()
+				else: TheLine(line=line).plot()
+		
+		# TheLine(line=line).plot(**plot_kwargs)
+		# simple_logger.debug('line.xy: %s',line.xy)
+		# plt.plot(*line.xy,**plot_kwargs)
+		# plt.plot(*line.parallel_offset(5).xy)
+		return lines
+	
+	@property
+	def cover_line_length(self):
+		if self.__cover_line_length is None:
+			# xy=self.__class__(self.polygon.envelope).xy
+			delta=self.bounds_xy[2]-self.bounds_xy[0]
+			self.__cover_line_length=np.linalg.norm(delta)*1.01
+		return self.__cover_line_length
+	
+	def get_field_lines(self,offset_distance,border_index=None,show=0):
+		# if border_index is None: slicer=lambda x:x[:]
+		# elif isinstance(border_index,Iterable): slicer=lambda x:[x[_i] for _i in border_index]
+		# else: slicer=lambda x:x[border_index]
+		if border_index!=0 and not border_index: checker=lambda x:True
+		elif isinstance(border_index,Iterable): checker=lambda x:x in border_index
+		else: checker=lambda x:x==border_index
+		borderlines=[TheLine(line=x,show='',width=offset_distance/2) for x in
+		             self.buffer(-1e-6,join_style=shg.JOIN_STYLE.mitre).get_exterior_lines(as_the_line=False,show=0)]
+		field_lines_data=collections.defaultdict(list)
+		for i,borderline in enumerate(borderlines):
+			if not checker(i): continue
+			counter=0
+			offset_lines=borderline.get_field_lines(self)
+			offset_lines.extend(borderline.offset_by(offset_distance,int(np.ceil(self.cover_line_length/offset_distance))))
+			offset_lines.extend(borderline.offset_by(-offset_distance,int(np.ceil(self.cover_line_length/offset_distance))))
+			for offset_line in offset_lines:
+				field_lines=offset_line.get_field_lines(self)
+				if not field_lines:
+					continue
+				for field_line in field_lines:
+					if not field_line: continue
+					
+					counter+=1
+					field_lines_data[i].append(field_line)
+			# if i==0 or i==1:
+			# 	field_line.plot('100',c='magenta',alpha=0.5)
+			simple_logger.info('counter: %s',counter)
+		
+		if show:
+			fig=plt.gcf()
+			fig.set_size_inches(16,9,forward=True)
+			for i,b in enumerate(borderlines):
+				if not checker(i): continue
+				self.plot()
+				boundary_label=f'Boundary_{i}'
+				b.plot('1001',text=boundary_label)
+				df=pd.DataFrame(field_lines_data[i],columns=[boundary_label])
+				df['length']=df.applymap(lambda x:x.line.length)
+				df[boundary_label].map(lambda x:x.plot('100',c='magenta',alpha=0.5))
+		# df['length'].plot.hist()
+		# plt.text(*np.array(self.polygon.centroid.xy),df.shape[0])
+		# plt.show()
+		return field_lines_data
+	
+	@property
+	def lims(self):
+		if self.__lims is None:
+			self.__lims=np.array([self.bounds_xy[0],self.bounds_xy[2]])
+		return self.__lims
+	
+	# region Discretization methods:
+	def pixelize(self,savename='',show=0,**fig_kwargs):
+		plt.clf()
+		fig=pyplot.figure(**dict(dict(num=1,figsize=(4,4),dpi=50,frameon=False),**fig_kwargs))
+		ax=plt.Axes(fig,[0.,0.,1.,1.],frameon=False)
+		ax.set_axis_off()
+		fig.add_axes(ax)
+		# ax=fig.add_subplot(111)
+		
+		path=pathify(self.polygon)
+		# patch=PathPatch(path,facecolor='#cccccc',edgecolor='#999999')
+		patch=PathPatch(path,facecolor='k',edgecolor='k')
+		
+		ax.add_patch(patch)
+		lims=np.array([self.bounds_xy[0],self.bounds_xy[2]])
+		ax.set_xlim(*lims[:,0])
+		ax.set_ylim(*lims[:,1])
+		ax.set_aspect('1.0')
+		fig.canvas.draw()
+		X=np.array(fig.canvas.renderer._renderer)
+		if savename: fig.savefig(savename)
+		plt.close(fig)
+		if show:
+			fig2=plt.figure()
+			ax2=fig2.add_subplot(111,frameon=False)
+			ax2.imshow(X)
+			plt.show()
+		return X
+	
+	@with_logging()
+	def katanize(self,threshold,show=0,**kwargs):
+		polygons=katana(self.polygon,threshold)
+		if show:
+			for p in polygons: gmtr.plot_polygon(p,**kwargs)
+		return polygons
+	
+	def get_interior_points(self,distance,border_index=None,show=0):
+		lines=collections.defaultdict(list)
+		if border_index is None:
+			# field_box=ThePoly(self.polygon.envelope)
+			for i,box_lines in self.get_field_lines(distance,[0,1]).items():
+				for bl in box_lines:
+					lines[i].append(bl)
+		else:
+			for i,field_lines in self.get_field_lines(distance,border_index).items():
+				for bl in field_lines:
+					lines[i].append(bl)
+		the_data=pd.DataFrame(lines[(border_index[-1] if border_index is not None else 1)],columns=['line2s'])
+		intersection_points=list()
+		for l1 in lines[0]:
+			points=the_data['line2s'].apply(lambda l2:l2.line.intersection(l1.line))
+			not_empty_ones=points.apply(lambda x:isinstance(x,shg.Point))
+			good_points=points[not_empty_ones]
+			if good_points.empty: continue
+			intersection_points.extend(good_points.tolist())
+		ps=pd.Series(intersection_points)
+		out=np.array(list(mi.flatten(ps.apply(lambda p:line_xy(p)))))
+		if show:
+			plt.scatter(out[:,0],out[:,1])
+			pass
+		return out
+	
+	@with_logging()
+	def generate_clusters(self,grid_resolution,n_clusters,show=''):
+		# interior_points=self.get_interior_points(distance=grid_resolution)
+		interior_points=self.generate_grid_points(grid_resolution=grid_resolution)
+		n_clusters=min(n_clusters,len(interior_points))
+		simple_logger.debug('n_clusters: %s',n_clusters)
+		kmeans=KMeans(n_clusters=n_clusters,random_state=1)
+		kmeans.fit(interior_points)
+		if show:
+			plot_clusters,plot_self=1,0
+			if len(show)==1: plot_clusters=int(show)
+			elif len(show)==2: plot_clusters,plot_self=[int(x) for x in show]
+			if plot_self: self.plot()
+			if plot_clusters:
+				plt.scatter(kmeans.cluster_centers_[:,0],kmeans.cluster_centers_[:,1],c='k')
+		return kmeans.cluster_centers_
+	
+	@with_logging()
+	def generate_grid_points(self,grid_resolution):
+		corners=self.bounds_xy[[0,2]]
+		x_grid_info=np.arange(*corners[:,0],step=grid_resolution)
+		y_grid_info=np.arange(*corners[:,1],step=grid_resolution)
+		grid_x,grid_y=np.meshgrid(x_grid_info,y_grid_info)
+		xy_coors=np.stack([grid_x.ravel(),grid_y.ravel()]).T
+		# print(xy_coors)
+		xy_df=pd.DataFrame(xy_coors,columns=['x','y'])
+		xy_df['inside']=xy_df.apply(lambda coor:self.polygon.contains(shg.Point([coor.x,coor.y])),axis=1)
+		xy_df=xy_df[xy_df['inside']].drop(columns=['inside'])
+		simple_logger.debug('xy_df.shape: %s',xy_df.shape)
+		return xy_df
+	
+	def to_numpy(self,resolution):
+		simple_logger.info('self.lims: %s',self.lims)
+		
+		delta=self.lims[1]-self.lims[0]
+		simple_logger.info('delta: %s',delta)
+		pixel_count=np.ceil(delta/resolution)[::-1].astype(int)
+		simple_logger.info('pixel_count: %s',pixel_count)
+		img_array=np.zeros(shape=pixel_count)
+		interior_points=np.round(self.get_interior_points(resolution),decimals=1)[:,[1,0]]
+		positions_in_grid=np.floor(interior_points/resolution).astype(int)
+		positions_in_grid=np.clip(positions_in_grid,a_min=[0,0],a_max=np.array(img_array.shape)-1)
+		img_array[positions_in_grid[:,0],positions_in_grid[:,1]]=1
+		return img_array
+	
+	# endregion
+	
+	# region Booleans:
+	@property
+	def is_clockwise(self):
+		if self.__isclockwise is not None: return self.__isclockwise
+		x=self.xy[:,0]
+		y=self.xy[:,1]
+		diff_x=x[1:]-x[:-1]
+		sum_y=y[:-1]+y[1:]
+		area=np.sum(diff_x*sum_y)
+		# simple_logger.info('x:\n%s',x)
+		# simple_logger.info('diff_x:\n%s',diff_x)
+		# simple_logger.info('y:\n%s',y)
+		# simple_logger.info('sum_y:\n%s',sum_y)
+		# simple_logger.info('area: %s',area)
+		if area>0:
+			self.__isclockwise=True
+		elif area<0:
+			self.__isclockwise=False
+		else:
+			simple_logger.info('self.polygon:\n%s',self.polygon)
+			raise NotImplementedError('Area is zero.')
+		return self.__isclockwise
+	
+	@property
+	def is_ok(self):
+		if self.__is_ok is not None: return self.__is_ok
+		if not self.is_clockwise:
+			simple_logger.info('self.polygon:\n%s',self.polygon)
+			# simple_logger.info('"self" is clockwise, but should be counter-clockwise')
+			simple_logger.info('"self" is counter-clockwise, but should be clockwise')
+			self.__is_ok=False
+			return self.__is_ok
+		for interior in self.polygon.interiors:
+			interior_poly=shg.Polygon(interior)
+			if is_clockwise(interior_poly):
+				simple_logger.info('Interior polygon:\n%s',interior_poly)
+				simple_logger.info('"Interior polygon" is clockwise, but should be counter-clockwise')
+				# simple_logger.info('"Interior polygon" is counter-clockwise, but should be clockwise')
+				self.__is_ok=False
+				return self.__is_ok
+		self.__is_ok=True
+		return self.__is_ok
+	
+	def touches(self,xy):
+		return self.polygon.touches(shg.Point(xy))
+	
+	@property
+	def is_convex(self):
+		if self.__is_convex is None:
+			if abs(self.p.area-self.convex_hull.p.area)<min_dist:
+				self.__is_convex=True
+			else:
+				self.__is_convex=False
+		return self.__is_convex
+	
+	# endregion
+	
+	# region Boustrophedon algorithm:
+	def get_connectivity_lines_at(self,xy,**the_line_kwargs):
+		line=TheLine([xy,xy+[0,1]])
+		cover_line=line.get_cover_line(self.cover_line_length)
+		res=cover_line.line.intersection(self.polygon)
+		outs=list()
+		if isinstance(res,shg.GeometryCollection):
+			if isinstance(res[0],shg.Point): return []
+			for geom in res:
+				if isinstance(geom,shg.LineString) and geom.touches(shg.Point(*xy)):
+					outs.append(TheLine(line=geom,**the_line_kwargs))
+		elif isinstance(res,shg.MultiLineString):
+			for geom in res:
+				if geom.touches(shg.Point(*xy)):
+					outs.append(TheLine(line=geom,**the_line_kwargs))
+		return outs
+	
+	def get_boustrophedon_lines(self,**the_line_kwargs):
+		outs=list()
+		for xy in self.xy:
+			lines=self.get_connectivity_lines_at(xy,**the_line_kwargs)
+			if lines: outs.append(lines)
+		for holexy in self.holes_xy:
+			xy_sorted=sorted(holexy[:-1],key=lambda x:x[0])
+			for xy in [xy_sorted[0],xy_sorted[-1]]:
+				lines=self.get_connectivity_lines_at(xy,**the_line_kwargs)
+				if lines: outs.append(lines)
+		return outs
+	
+	def get_boustrophedon_cells(self,as_the_poly=True,show=0,**plot_kwargs):
+		assert self.is_ok
+		line_groups=self.get_boustrophedon_lines()
+		merged_lines=list()
+		for lines in line_groups:
+			line=shops.linemerge(shg.MultiLineString([x.line for x in lines]))
+			merged_lines.append(line)
+		merged_lines.sort(key=lambda x:x.xy[0])
+		cells=generate_cells(self.polygon,merged_lines)
+		simple_logger.info('len(cells): %s',len(cells))
+		if show:
+			for i,c in enumerate(cells):
+				self.__class__(c.buffer(-0.5)).plot(**dict(dict(c=None,text=str(i)),**plot_kwargs))
+		if as_the_poly: cells=[self.__class__(x) for x in cells]
+		return cells
+	
+	def get_connectivity_graph(self,as_the_poly=True,show=''):
+		G=nx.Graph()
+		cells=self.get_boustrophedon_cells(as_the_poly=as_the_poly,show=int(show))
+		
+		G.add_nodes_from(cells)
+		
+		if as_the_poly: polymaker=lambda x:x.polygon
+		else: polymaker=lambda x:x
+		connections=list()
+		bufferer=lambda x:x.buffer(1e-3,cap_style=shg.CAP_STYLE.square)
+		
+		for c1,c2 in itertools.combinations(cells,2):
+			c1_poly: shg.Polygon=polymaker(c1)
+			c2_poly: shg.Polygon=polymaker(c2)
+			
+			merged_mpoly=bufferer(shg.MultiPolygon([c1_poly,c2_poly]))
+			if isinstance(merged_mpoly,shg.Polygon):
+				intersection_area=bufferer(c1_poly).intersection(bufferer(c2_poly)).area
+				if intersection_area<1e-5: continue
+				connections.append([c1,c2])
+				G.add_edge(c1,c2)
+				if show:
+					TheLine(line=shg.LineString([c1_poly.centroid,c2_poly.centroid]),
+					        show=show,c='gray',ls='--')
+		return cells,G
+	
+	# endregion
+	
+	# def get_convex_hull(self):
+	# 	if self.__convex_hull is None:
+	# 		hull=spatial.ConvexHull(self.xy)
+	# 		vertices=np.array(sorted(hull.vertices))
+	# 		# convex_poly=ThePoly(hull.points[hull.vertices]).plot(c='b',alpha=0.5)
+	# 		convex_poly=ThePoly(self.xy[vertices])  #.plot(c='b',alpha=0.5)
+	# 		self.__convex_hull=convex_poly
+	# 	return self.__convex_hull
+	@property
+	def convex_hull(self):
+		if self.__convex_hull is None:
+			self.__convex_hull=self.__class__(self.p.convex_hull)
+		return self.__convex_hull
+	
+	def __eq__(self,other):
+		if isinstance(other,ThePoly):
+			return self.id==other.id
+		else:
+			return self.id==ThePoly(other).id
+	
+	def __len__(self):
+		return len(self.xy)-1
