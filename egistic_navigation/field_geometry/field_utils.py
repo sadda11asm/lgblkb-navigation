@@ -1,3 +1,6 @@
+import collections
+import itertools
+import more_itertools as mi
 import networkx as nx
 import numpy as np
 import shapely.geometry as shg
@@ -8,172 +11,240 @@ from egistic_navigation.base_geometry.point_utils import ThePoint
 from egistic_navigation.base_geometry.poly_utils import ThePoly
 from egistic_navigation.global_support import simple_logger,with_logging
 
-class DecisionPoint(ThePoint):
-	
-	def __init__(self,xy,**box_kwargs):
-		super(DecisionPoint,self).__init__(xy=xy,**box_kwargs)
-	
-	pass
+#
+# class DecisionLine(TheLine):
+#
+# 	def __init__(self,coordinates,parent=None,**kwargs):
+# 		super(DecisionLine,self).__init__(coordinates=coordinates,**kwargs)
+# 		self.parents=[parent] if parent else []
+#
+# class FieldPoint(ThePoint):
+#
+# 	def __init__(self,xy,parent=None,is_border_point=True,**box_kwargs):
+# 		super(FieldPoint,self).__init__(xy=xy,**box_kwargs)
+# 		# parent=box_kwargs.pop('parent',None)
+# 		self.parents=[parent] if parent else []
+# 		self.is_border_point=is_border_point#box_kwargs.pop('is_exterior',None)
+# 	pass
 
-class TheField(ThePoly):
+# class TheField(ThePoly):
+#
+# 	def __init__(self,polygon,parent=None,**data):
+# 		super(TheField,self).__init__(polygon=polygon,**data)
+# 		# self.line_type=DecisionLine
+# 		# self.point_type=FieldPoint
+# 		self.__graph=None
+# 		self.__extension_lines=list()
+# 		self.parent=parent
+#
+# 	def generate_graph(self,parent_graph=None):
+# 		G=parent_graph or nx.Graph()
+# 		# line_kwargs=dict(box_kwargs,**(line_opts or {}))
+# 		lines=self.get_exterior_lines()
+# 		# vertex_angles=self.get_angles_at_vertices()
+# 		# if self.parent: vertex_angles=360-vertex_angles
+#
+# 		# point_kwargs=dict()
+# 		# point_kwargs.update(box_kwargs)
+# 		# point_kwargs.update(point_opts or {})
+#
+# 		for i in range(len(lines)):
+# 			next_index=(i+1) if i+1==len(lines) else 0
+#
+# 			node=ThePoint(self.xy[i])
+# 			next_node=ThePoint(self.xy[next_index])
+#
+# 			G.add_node(node,lines=[lines[i],lines[i-1]])
+# 			G.add_edge(node,next_node,line=lines[i])
+#
+# 		for hole in self.holes:
+# 			hole.generate_graph(G)
+#
+# 		# for i, xy in enumerate(self.xy):
+# 		# 	G.add_node(i,)
+#
+# 		# for i,line in enumerate(lines):
+# 		# 	# G.add_edge(*map(ThePoint,line.xy),line=line)
+# 		# 	if i+1==len(lines):
+# 		# 		G.add_edge(i,0,line=line)
+# 		# 	else:
+# 		# 		G.add_edge(i,i+1,line=line)
+# 		return G
+#
+# 	@property
+# 	def G(self):
+# 		if self.__graph is None: self.__graph=self.generate_graph()
+# 		return self.__graph
+#
+# 	@with_logging()
+# 	def get_extension_lines(self,parent=None,show=False):
+# 		the_main_poly=parent or self  #ThePoly(self.p)#self
+# 		if self.is_convex:
+# 			simple_logger.info('The field is convex. Extension lines are absent.')
+# 			return self
+#
+# 		delta=self.convex_hull.p.difference(self.p)
+# 		if delta.is_empty:
+# 			simple_logger.info('Delta is empty. Skipping.')
+# 			return self
+# 		elif isinstance(delta,shg.MultiPolygon):
+# 			chunks=[TheChunk(x,self,id=f'Chunk-{i}') for i,x in enumerate(delta)]
+# 		elif isinstance(delta,shg.Polygon):
+# 			chunks=[TheChunk(delta,self)]
+# 		else:
+# 			simple_logger.critical('delta: %s',delta)
+# 			# self.plot()
+# 			# self.convex_hull.plot(c='b')
+# 			# plt.show()
+# 			raise NotImplementedError
+#
+# 		out_extension_lines=list()
+# 		for i_chunk,the_chunk in enumerate(chunks):
+# 			# if i_chunk!=3: continue
+# 			chunk_hull=the_chunk.convex_hull  #.plot(c='b',lw=0.5,ls='--',text=f'chunk_hull-{i_chunk}')
+# 			for i_point,xy in enumerate(the_chunk.xy[:-1]):
+# 				xy_point=ThePoint(xy,)  #.plot(f'{i_point}')
+# 				# simple_logger.debug('Point-%s',i_point)
+# 				# the_chunk.baseline.plot(c='r')
+# 				if not the_chunk.touches_parent or (chunk_hull.touches(xy) and the_chunk.baseline.line.distance(xy_point.point)>min_dist):
+# 					# simple_logger.info('Point-%s',i_point)
+# 					# extension_lines=the_chunk[xy]['extension_lines']=the_main_poly[xy]['extension_lines']=list()
+# 					extension_lines=the_main_poly[xy]['extension_lines']=list()
+# 					for i_line,line in enumerate(the_chunk[xy]['lines']):
+# 						line: TheLine=line  #.plot(text=str(i_line))
+# 						extension_line=line.extend_from(xy,the_main_poly.cover_line_length)
+# 						cropped_line=the_main_poly.p.intersection(extension_line.line)
+# 						# simple_logger.debug('cropped_line:\n%s',cropped_line)
+# 						if isinstance(cropped_line,shg.MultiLineString):
+# 							cropped_line=cropped_line[0]
+# 						elif isinstance(cropped_line,shg.GeometryCollection):
+# 							continue
+#
+# 						# self.plot()
+# 						cropped_extension_line=TheLine(cropped_line)  #.plot()
+# 						# xy_point.plot(i_point)
+# 						# cropped_extension_line.plot()
+# 						# plt.show()
+# 						if xy_point in cropped_extension_line:
+# 							if cropped_extension_line.line.length<1e-3:
+# 								simple_logger.warning('Too short extension line encountered.')
+# 							extension_lines.append(cropped_extension_line)
+# 							out_extension_lines.append(cropped_extension_line)
+#
+# 			geom_collection=chunk_hull.p.intersection(self.p)
+# 			sub_chunks=list()
+# 			for geom_obj in geom_collection:
+# 				if isinstance(geom_obj,shg.LineString):
+# 					# TheLine(geom_obj).plot(text='line',c='y')
+# 					pass
+# 				elif isinstance(geom_obj,shg.MultiLineString):
+# 					# [TheLine(x).plot(text='line',c='cyan') for x in geom_obj]
+# 					pass
+# 				elif isinstance(geom_obj,shg.Polygon):
+# 					sub_chunk=TheField(geom_obj)  #.plot(text='ThePoly',c='r')
+# 					sub_chunks.append(sub_chunk)
+# 				else:
+# 					simple_logger.debug('geom_obj: %s',geom_obj)
+# 					raise NotImplementedError
+#
+# 			for smaller_chunk in sub_chunks:
+# 				if not smaller_chunk.is_convex:
+# 					# the_chunk.plot(f'the_chunk-{i_chunk}')
+# 					# smaller_chunk.plot('smaller_chunk',c='r',lw=0.3)
+# 					# smaller_chunk.id="_".join(map(str,[self.id,'smaller_chunk']))
+# 					# simple_logger.debug('smaller_chunk:\n%s',smaller_chunk)
+# 					smaller_chunk.get_extension_lines(parent=the_main_poly)
+#
+# 		if show:
+# 			for ext_line in out_extension_lines:
+# 				ext_line.plot()
+# 		simple_logger.debug('Extension lines count: %s',len(out_extension_lines))
+# 		return out_extension_lines
+#
+# 	@property
+# 	def extension_lines(self):
+# 		if not self.__extension_lines:
+# 			self.__extension_lines=self.get_extension_lines()
+# 		return self.__extension_lines
+#
+# 	def get_angles_at_vertices(self):
+# 		vectors=self.xy[1:]-self.xy[:-1]
+# 		line_angles=np.arctan2(vectors[:,1],vectors[:,0])*180/np.pi
+# 		line_angles=np.append(line_angles,line_angles[0])
+# 		angle_diff=((line_angles[1:]-line_angles[:-1])+180)%360
+# 		angle_at_vertices=np.zeros(angle_diff.shape)
+# 		angle_at_vertices[0]=angle_diff[-1]
+# 		angle_at_vertices[1:]=angle_diff[:-1]
+# 		return angle_at_vertices
+#
+# 	def __getitem__(self,item):
+# 		# simple_logger.debug('item: %s',item)
+# 		if type(item) in (np.ndarray,tuple,list):
+# 			# if isinstance(item,np.ndarray): item=item.ravel()
+# 			u,v=item
+# 			return self.G.nodes[u,v]
+# 		elif isinstance(item,int):
+# 			simple_logger.warning('Oppa!!!')
+# 			return self.exterior_lines[item]
+# 		else:
+# 			return super().__getitem__(item)
+
+
+class FieldPoly(ThePoly):
 	
-	def __init__(self,polygon,**box_kwargs):
-		super(TheField,self).__init__(polygon=polygon,**box_kwargs)
-		self.__graph=None
-		self.__extension_lines=list()
+	def __init__(self,polygon,**data):
+		super(FieldPoly,self).__init__(polygon=polygon,**data)
+		self._decision_points=collections.OrderedDict()
 	
-	def get_graph(self,parent_graph=None,**box_kwargs):
-		G=parent_graph or nx.Graph()
-		lines=self.get_exterior_lines(**box_kwargs)
-		for i in range(len(lines)):
-			next_index=(i+1) if i+1==len(lines) else 0
-			node=ThePoint(self.xy[i],parent=self,is_exterior=True,**box_kwargs)
-			next_node=ThePoint(self.xy[next_index],parent=self,**box_kwargs)
-			# if nodes_as_the_points:
-			# 	node=ThePoint(self.xy[i],i)
-			# 	next_node=ThePoint(self.xy[next_index],next_index)
-			# else:
-			# 	node=i
-			# 	next_node=next_index
-			G.add_node(node,lines=[lines[i],lines[i-1]])
-			G.add_edge(node,next_node,line=lines[i])
-		
-		for hole in self.holes:
-			hole.get_graph(G,)
-		
-		# for i, xy in enumerate(self.xy):
-		# 	G.add_node(i,)
-		
-		# for i,line in enumerate(lines):
-		# 	# G.add_edge(*map(ThePoint,line.xy),line=line)
-		# 	if i+1==len(lines):
-		# 		G.add_edge(i,0,line=line)
-		# 	else:
-		# 		G.add_edge(i,i+1,line=line)
-		return G
+	# def _add_node(self,G,xy,parent_lines):
+	# 	node=ThePoint(xy)
+	# 	G.add_node(node,lines=parent_lines)
+	# 	return node
 	
-	@property
-	def graph(self):
-		if self.__graph is None: self.__graph=self.get_graph()
-		return self.__graph
-	
-	@with_logging()
-	def get_extension_lines(self,parent=None,show=False):
-		the_main_poly=parent or self  #ThePoly(self.p)#self
-		if self.is_convex:
-			simple_logger.info('The field is convex. Extension lines are absent.')
-			return self
+	def get_decision_points(self,show=False):
+		simple_logger.debug('poly_points count: %s',len(self.poly_points))
+		extension_points=[x[1] for x in self.extension_lines]
+		simple_logger.debug('extension_points count: %s',len(extension_points))
 		
-		delta=self.convex_hull.p.difference(self.p)
-		if delta.is_empty:
-			simple_logger.info('Delta is empty. Skipping.')
-			return self
-		elif isinstance(delta,shg.MultiPolygon):
-			chunks=[TheChunk(x,self,id=f'Chunk-{i}') for i,x in enumerate(delta)]
-		elif isinstance(delta,shg.Polygon):
-			chunks=[TheChunk(delta,self)]
-		else:
-			simple_logger.critical('delta: %s',delta)
-			# self.plot()
-			# self.convex_hull.plot(c='b')
-			# plt.show()
-			raise NotImplementedError
+		border_points=[*self.poly_points,*extension_points]
+		simple_logger.info('border_points count: %s',len(border_points))
 		
-		out_extension_lines=list()
-		for i_chunk,the_chunk in enumerate(chunks):
-			# if i_chunk!=3: continue
-			chunk_hull=the_chunk.convex_hull  #.plot(c='b',lw=0.5,ls='--',text=f'chunk_hull-{i_chunk}')
-			for i_point,xy in enumerate(the_chunk.xy[:-1]):
-				xy_point=ThePoint(xy,)  #.plot(f'{i_point}')
-				# simple_logger.debug('Point-%s',i_point)
-				# the_chunk.baseline.plot(c='r')
-				if not the_chunk.touches_parent or (chunk_hull.touches(xy) and the_chunk.baseline.line.distance(xy_point.g)>min_dist):
-					# simple_logger.info('Point-%s',i_point)
-					# extension_lines=the_chunk[xy]['extension_lines']=the_main_poly[xy]['extension_lines']=list()
-					extension_lines=the_main_poly[xy]['extension_lines']=list()
-					for i_line,line in enumerate(the_chunk[xy]['lines']):
-						line: TheLine=line  #.plot(text=str(i_line))
-						extension_line=line.extend_from(xy,the_main_poly.cover_line_length)
-						cropped_line=the_main_poly.p.intersection(extension_line.line)
-						# simple_logger.debug('cropped_line:\n%s',cropped_line)
-						if isinstance(cropped_line,shg.MultiLineString):
-							cropped_line=cropped_line[0]
-						elif isinstance(cropped_line,shg.GeometryCollection):
-							continue
-						
-						# self.plot()
-						cropped_extension_line=TheLine(cropped_line)  #.plot()
-						# xy_point.plot(i_point)
-						# cropped_extension_line.plot()
-						# plt.show()
-						if xy_point in cropped_extension_line:
-							if cropped_extension_line.line.length<1e-3:
-								simple_logger.warning('Too short extension line encountered.')
-							extension_lines.append(cropped_extension_line)
-							out_extension_lines.append(cropped_extension_line)
+		inner_points=list()
+		for l1,l2 in itertools.combinations(self.extension_lines,2):
+			if l1[0]==l2[0]: continue
+			result=l1.line.intersection(l2.line)
+			if result.is_empty: continue
+			the_point=ThePoint(result)
+			self._add_node(self.G,the_point,[l1,l2],is_intermediate=True)
+			# self.G.add_node(the_point,lines=[l1,l2])
 			
-			geom_collection=chunk_hull.p.intersection(self.p)
-			sub_chunks=list()
-			for geom_obj in geom_collection:
-				if isinstance(geom_obj,shg.LineString):
-					# TheLine(geom_obj).plot(text='line',c='y')
-					pass
-				elif isinstance(geom_obj,shg.MultiLineString):
-					# [TheLine(x).plot(text='line',c='cyan') for x in geom_obj]
-					pass
-				elif isinstance(geom_obj,shg.Polygon):
-					sub_chunk=TheField(geom_obj)  #.plot(text='ThePoly',c='r')
-					sub_chunks.append(sub_chunk)
-				else:
-					simple_logger.debug('geom_obj: %s',geom_obj)
-					raise NotImplementedError
-			
-			for smaller_chunk in sub_chunks:
-				if not smaller_chunk.is_convex:
-					# the_chunk.plot(f'the_chunk-{i_chunk}')
-					# smaller_chunk.plot('smaller_chunk',c='r',lw=0.3)
-					# smaller_chunk.id="_".join(map(str,[self.id,'smaller_chunk']))
-					# simple_logger.debug('smaller_chunk:\n%s',smaller_chunk)
-					smaller_chunk.get_extension_lines(parent=the_main_poly)
+			inner_points.append(the_point)
 		
+		# inner_points=set(inner_points)
+		simple_logger.info('inner_points count: %s',len(inner_points))
+		
+		decision_points=collections.OrderedDict()
+		decision_points['border']=border_points
+		decision_points['inner']=inner_points
+		decision_points['all']=[*border_points,*inner_points]
+		
+		if len(decision_points['all'])!=len(set(decision_points['all'])):
+			simple_logger.critical('Merging of points needed.')
+		
+		# decision_points=set(decision_points)
+		simple_logger.info('decision_points count: %s',len(decision_points['all']))
+		self.G.decision_points=self.data.decision_points=decision_points
+		# self.data.decision_points=decision_points
 		if show:
-			for ext_line in out_extension_lines:
-				ext_line.plot()
-		simple_logger.debug('Extension lines count: %s',len(out_extension_lines))
-		return out_extension_lines
+			for decision_point in decision_points['all']:
+				decision_point.plot()
+		return decision_points
 	
 	@property
-	def extension_lines(self):
-		if not self.__extension_lines:
-			self.__extension_lines=self.get_extension_lines()
-		return self.__extension_lines
-	
-	def __getitem__(self,item):
-		# simple_logger.debug('item: %s',item)
-		if type(item) in (np.ndarray,tuple,list):
-			if isinstance(item,np.ndarray): item=item.ravel()
-			u,v=item
-			return self.graph.nodes[u,v]
-		elif isinstance(item,int):
-			return self.graph.nodes[item]
-		else:
-			return super().__getitem__(item)
-
-class TheChunk(TheField):
-	
-	def __init__(self,polygon,parent=None,**box_kwargs):
-		super(TheChunk,self).__init__(polygon=polygon,**box_kwargs)
-		self.parent: TheField=parent
-		self.touches_parent=self.parent.p.exterior.touches(self.p) if parent else False
-		self.baseline=None
-		if self.touches_parent:
-			parent_lines=self.parent.get_exterior_lines()
-			for chunk_line in self.get_exterior_lines():
-				if chunk_line not in parent_lines:
-					self.baseline=chunk_line
-					# chunk_line.plot(text='baseline')
-					break
-			assert self.baseline is not None
+	def decision_points(self):
+		if not self._decision_points:
+			self._decision_points=self.get_decision_points()
+		return self._decision_points
 
 @with_logging()
 def main():
@@ -358,7 +429,7 @@ def main():
 	# # plt.scatter(points[:,0],points[:,1],c='k')
 	# # plt.show()
 	# return
-	# cells,graph=crop_field.get_connectivity_graph(True,show='000')
+	# cells,G=crop_field.get_connectivity_graph(True,show='000')
 	# target_cell=cells[0]
 	# target_cell.plot()
 	# print(target_cell)
@@ -369,7 +440,7 @@ def main():
 	# # plt.show()
 	# return
 	# graph_ids=collections.defaultdict(list)
-	# for cell1,cell2 in graph:
+	# for cell1,cell2 in G:
 	# 	graph_ids[cell1.id].append(cell2.id)
 	# for k,vs in graph_ids.items():
 	# 	print(len(vs))

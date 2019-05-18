@@ -50,21 +50,22 @@ def plot_line(line):
 
 class GenericGeometry(object):
 	
-	def __init__(self,**box_kwargs):
-		self.__box=Box(box_kwargs)
+	def __init__(self,**data):
+		self.data=Box(data,ordered_box=True)
 		self.id=uuid.uuid4()
 	
 	def _generate_id(self,id_obj):
-		self.id=self.__box.pop('id',gsup.get_md5(str(id_obj)))
+		self.id=self.data.pop('id',gsup.get_md5(str(id_obj)))
 	
 	def __repr__(self):
-		return "\n".join([gsup.reprer(self),gsup.reprer(self.__box)])
+		return "\n".join([gsup.reprer(self)])
 	
 	def __getitem__(self,item):
 		# simple_logger.debug('item: %s',item)
-		return self.__box[item]
+		return self.data[item]
 		# raise KeyError('Invalid key provided.',dict(key=item,key_type=type(item)))
 		pass
+	
 
 def line_xy(linestring):
 	return np.array(linestring.xy).T

@@ -9,16 +9,10 @@ from shapely import geometry as shg
 
 from egistic_navigation.base_geometry.geom_utils import GenericGeometry,min_dist
 
-def main():
-	pass
-
-if __name__=='__main__':
-	main()
-
 class ThePoint(GenericGeometry):
 	
-	def __init__(self,xy,**box_kwargs):
-		super(ThePoint,self).__init__(**box_kwargs)
+	def __init__(self,xy,**data):
+		super(ThePoint,self).__init__(**data)
 		if isinstance(xy,shg.Point): xy=xy.x,xy.y
 		elif isinstance(xy,ThePoint): xy=xy.xy
 		if len(xy)<2: raise ValueError('Invalid xy.',dict(xy=str(xy),type=str(type(xy))))
@@ -36,7 +30,7 @@ class ThePoint(GenericGeometry):
 		return self.xy[1]
 	
 	@property
-	def g(self):
+	def point(self):
 		return shg.Point(self.xy)
 	
 	@property
@@ -55,9 +49,9 @@ class ThePoint(GenericGeometry):
 	
 	def __eq__(self,other):
 		if isinstance(other,ThePoint):
-			return self.g.distance(other.g)<min_dist
+			return self.point.distance(other.point)<min_dist
 		else:
-			return self.g.distance(ThePoint(other).g)<min_dist
+			return self.point.distance(ThePoint(other).point)<min_dist
 		
 		# elif isinstance(other,ThePoint):
 		# 	return self.tup_xy==other.tup_xy

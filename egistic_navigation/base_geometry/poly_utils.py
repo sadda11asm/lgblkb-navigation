@@ -1,3 +1,6 @@
+from inspect import signature
+from typing import Union
+from egistic_navigation.base_geometry.point_utils import ThePoint
 import collections
 import itertools
 from typing import Iterable
@@ -21,10 +24,38 @@ from egistic_navigation.utils.google_way import SimpleTSP
 from lgblkb_tools import geometry as gmtr
 from lgblkb_tools.log_support import with_logging
 
+class TheNodeView(object):
+	
+	def __init__(self,parent_graph,getter_obj):
+		self.parent_graph=parent_graph
+		self.getter_obj=getter_obj
+	
+	def __getitem__(self,item):
+		if type(item) in [list,tuple]: return self.getter_obj(*item)
+		else: return self.getter_obj(item)
+
+class TheGraph(nx.Graph):
+	
+	#crop_field.G.nodes[decision_points['inner'][0]]['lines'][1].all_points
+	def __init__(self,incoming_graph_data=None,**attr):
+		super(TheGraph,self).__init__(incoming_graph_data=incoming_graph_data,**attr)
+		self.decision_points=collections.OrderedDict()
+	
+	def inner_node_getter(self,inner_node_index,*keys):
+		result=self.nodes[self.decision_points['inner'][inner_node_index]]
+		for key in keys:
+			result=result[key]
+		return result
+	
+	@property
+	def inner_nodes(self):
+		return TheNodeView(self,self.inner_node_getter)
+
 class ThePoly(GenericGeometry):
 	
-	def __init__(self,polygon,**box_kwargs):
-		super(ThePoly,self).__init__(**box_kwargs)
+	def __init__(self,polygon,**data):
+		super(ThePoly,self).__init__(**data)
+		
 		if isinstance(polygon,shg.Polygon):
 			self.polygon: shg.Polygon=polygon
 		else:
@@ -36,23 +67,27 @@ class ThePoly(GenericGeometry):
 			# raise AssertionError(f"Polygon {self.polygon} is not a valid polygon.")
 			simple_logger.warning(f"Polygon %s is not a valid polygon.",self.polygon)
 		
-		self.__xy=None
-		self.__holes=None
-		self.__cover_line_length=None
-		self.__bounds_xy=None
-		self.__lims=None
-		self.__is_ok=None
-		self.__isclockwise=None
+		self._xy=None
+		self._holes=None
+		self._cover_line_length=None
+		self._bounds_xy=None
+		self._lims=None
+		self._is_ok=None
+		self._isclockwise=None
 		self.is_multilinestring=isinstance(self.polygon.boundary,shg.MultiLineString)
 		
-		self.__is_convex=None
-		# self.__graph_with_the_points=None
-		self.__convex_hull=None
-		self.__holes_xy=None
-		self.__holes=None
+		self._is_convex=None
+		self._convex_hull=None
+		self._holes_xy=None
+		self._holes=None
 		
-		self.__exterior_lines=list()
-		self.__box=Box(box_kwargs)
+		# self.parent=parent
+		self._exterior_lines=list()
+		self._graph=None
+		self._points=list()
+		self._all_points=list()
+		self._extension_lines=list()
+		self.data=Box(data)
 	
 	# region Class methods:
 	@classmethod
@@ -142,6 +177,7 @@ class ThePoly(GenericGeometry):
 			# 		return holy_field
 			except Exception as exc:
 				simple_logger.debug('exc:\n%s',exc)
+				raise
 				pass
 	
 	@classmethod
@@ -151,9 +187,9 @@ class ThePoly(GenericGeometry):
 	# endregion
 	
 	def original_poly(self):
-		if not self.__box.get('__toy_poly_scale__'):
+		if not self.data.get('__toy_poly_scale__'):
 			raise AttributeError('The polygon is not a toy. Original polygon does not exist.',dict(polygon=str(self)))
-		return self.__class__(self.xy/self.__box['__toy_poly_scale__']+self.__box['__toy_poly_mean_xy__'])
+		return self.__class__(self.xy/self.data['__toy_poly_scale__']+self.data['__toy_poly_mean_xy__'])
 	
 	def toy_poly(self,scale=1e-3):
 		mean_xy=np.mean(self.xy,axis=0)
@@ -168,7 +204,9 @@ class ThePoly(GenericGeometry):
 		return self.polygon
 	
 	def plot(self,text=None,**kwargs):
-		gmtr.plot_polygon(self.polygon,**dict(dict(c='gray'),**kwargs))
+		# gmtr.plot_polygon(self.polygon,**dict(dict(c='gray'),**kwargs))
+		gmtr.plot_polygon(self.polygon,**kwargs)
+		gmtr.plot_patches(map(lambda h:h.p,self.holes),alpha=0.7)
 		if text is not None: plt.text(*np.array(self.polygon.centroid.xy),s=text)
 		return self
 	
@@ -179,21 +217,21 @@ class ThePoly(GenericGeometry):
 	
 	@property
 	def holes(self):
-		if self.__holes is None:
+		if self._holes is None:
 			if isinstance(self.p.boundary,shg.MultiLineString):
-				self.__holes=[self.__class__(x) for x in self.p.boundary[1:]]
+				self._holes=[self.__class__(x,parent=self) for x in self.p.boundary[1:]]
 			else:
-				self.__holes=[]
-		return self.__holes
+				self._holes=[]
+		return self._holes
 	
 	@property
 	def holes_xy(self):
-		if self.__holes_xy is None:
+		if self._holes_xy is None:
 			if isinstance(self.polygon.boundary,shg.MultiLineString):
-				self.__holes_xy=[line_xy(x) for x in self.polygon.boundary[1:]]
+				self._holes_xy=[line_xy(x) for x in self.polygon.boundary[1:]]
 			else:
-				self.__holes_xy=[]
-		return self.__holes_xy
+				self._holes_xy=[]
+		return self._holes_xy
 	
 	@property
 	def all_xy(self):
@@ -201,27 +239,39 @@ class ThePoly(GenericGeometry):
 	
 	@property
 	def xy(self):
-		if self.__xy is None:
+		if self._xy is None:
 			if self.is_multilinestring:
-				self.__xy=line_xy(self.polygon.boundary[0])
+				self._xy=line_xy(self.polygon.boundary[0])
 			else:
-				self.__xy=line_xy(self.polygon.boundary)
-		return self.__xy
+				self._xy=line_xy(self.polygon.boundary)
+		return self._xy
 	
 	@property
 	def bounds_xy(self):
-		if self.__bounds_xy is None:
-			self.__bounds_xy=line_xy(self.polygon.envelope.boundary)
-		return self.__bounds_xy
+		if self._bounds_xy is None:
+			self._bounds_xy=line_xy(self.polygon.envelope.boundary)
+		return self._bounds_xy
 	
 	@property
 	def exterior_lines(self):
-		if not self.__exterior_lines: self.__exterior_lines=self.get_exterior_lines()
-		return self.__exterior_lines
+		if not self._exterior_lines: self._exterior_lines=self.get_exterior_lines()
+		return self._exterior_lines
 	
-	def get_exterior_lines(self,as_the_line=True,show=0,**box_kwargs):
+	@property
+	def points(self):
+		if not self._points:
+			self._points=[ThePoint(xy) for xy in self.xy[:-1]]
+		return self._points
+	
+	@property
+	def poly_points(self):
+		if not self._all_points:
+			self._all_points=[ThePoint(xy) for xy in self.all_xy]
+		return self._all_points
+	
+	def get_exterior_lines(self,as_the_line=True,show=0):
 		lines=list()
-		if as_the_line: line_getter=lambda _line:TheLine(_line,parent=self,is_exterior=True,**box_kwargs)
+		if as_the_line: line_getter=lambda _line:TheLine(_line)
 		else: line_getter=lambda _line:_line
 		current_chunk=self.polygon.boundary[0] if self.is_multilinestring else self.polygon.boundary
 		for xy in self.xy[1:-1]:
@@ -230,9 +280,9 @@ class ThePoly(GenericGeometry):
 			lines.append(line_getter(line))
 		lines.append(line_getter(current_chunk))
 		if show:
-			for line in lines:
+			for i,line in enumerate(lines):
 				if as_the_line: line.plot()
-				else: TheLine(line=line).plot()
+				else: TheLine(line).plot()
 		
 		# TheLine(line=line).plot(**plot_kwargs)
 		# simple_logger.debug('line.xy: %s',line.xy)
@@ -242,11 +292,11 @@ class ThePoly(GenericGeometry):
 	
 	@property
 	def cover_line_length(self):
-		if self.__cover_line_length is None:
+		if self._cover_line_length is None:
 			# xy=self.__class__(self.polygon.envelope).xy
 			delta=self.bounds_xy[2]-self.bounds_xy[0]
-			self.__cover_line_length=np.linalg.norm(delta)*1.01
-		return self.__cover_line_length
+			self._cover_line_length=np.linalg.norm(delta)*1.01
+		return self._cover_line_length
 	
 	def get_field_lines(self,offset_distance,border_index=None,show=0):
 		# if border_index is None: slicer=lambda x:x[:]
@@ -255,7 +305,7 @@ class ThePoly(GenericGeometry):
 		if border_index!=0 and not border_index: checker=lambda x:True
 		elif isinstance(border_index,Iterable): checker=lambda x:x in border_index
 		else: checker=lambda x:x==border_index
-		borderlines=[TheLine(line=x,show='',width=offset_distance/2) for x in
+		borderlines=[TheLine(x,width=offset_distance/2) for x in
 		             self.buffer(-1e-6,join_style=shg.JOIN_STYLE.mitre).get_exterior_lines(as_the_line=False,show=0)]
 		field_lines_data=collections.defaultdict(list)
 		for i,borderline in enumerate(borderlines):
@@ -295,9 +345,9 @@ class ThePoly(GenericGeometry):
 	
 	@property
 	def lims(self):
-		if self.__lims is None:
-			self.__lims=np.array([self.bounds_xy[0],self.bounds_xy[2]])
-		return self.__lims
+		if self._lims is None:
+			self._lims=np.array([self.bounds_xy[0],self.bounds_xy[2]])
+		return self._lims
 	
 	# region Discretization methods:
 	def pixelize(self,savename='',show=0,**fig_kwargs):
@@ -411,7 +461,7 @@ class ThePoly(GenericGeometry):
 	# region Booleans:
 	@property
 	def is_clockwise(self):
-		if self.__isclockwise is not None: return self.__isclockwise
+		if self._isclockwise is not None: return self._isclockwise
 		x=self.xy[:,0]
 		y=self.xy[:,1]
 		diff_x=x[1:]-x[:-1]
@@ -423,45 +473,45 @@ class ThePoly(GenericGeometry):
 		# simple_logger.info('sum_y:\n%s',sum_y)
 		# simple_logger.info('area: %s',area)
 		if area>0:
-			self.__isclockwise=True
+			self._isclockwise=True
 		elif area<0:
-			self.__isclockwise=False
+			self._isclockwise=False
 		else:
 			simple_logger.info('self.polygon:\n%s',self.polygon)
 			raise NotImplementedError('Area is zero.')
-		return self.__isclockwise
+		return self._isclockwise
 	
 	@property
 	def is_ok(self):
-		if self.__is_ok is not None: return self.__is_ok
+		if self._is_ok is not None: return self._is_ok
 		if not self.is_clockwise:
 			simple_logger.info('self.polygon:\n%s',self.polygon)
 			# simple_logger.info('"self" is clockwise, but should be counter-clockwise')
 			simple_logger.info('"self" is counter-clockwise, but should be clockwise')
-			self.__is_ok=False
-			return self.__is_ok
+			self._is_ok=False
+			return self._is_ok
 		for interior in self.polygon.interiors:
 			interior_poly=shg.Polygon(interior)
 			if is_clockwise(interior_poly):
 				simple_logger.info('Interior polygon:\n%s',interior_poly)
 				simple_logger.info('"Interior polygon" is clockwise, but should be counter-clockwise')
 				# simple_logger.info('"Interior polygon" is counter-clockwise, but should be clockwise')
-				self.__is_ok=False
-				return self.__is_ok
-		self.__is_ok=True
-		return self.__is_ok
+				self._is_ok=False
+				return self._is_ok
+		self._is_ok=True
+		return self._is_ok
 	
 	def touches(self,xy):
 		return self.polygon.touches(shg.Point(xy))
 	
 	@property
 	def is_convex(self):
-		if self.__is_convex is None:
+		if self._is_convex is None:
 			if abs(self.p.area-self.convex_hull.p.area)<min_dist:
-				self.__is_convex=True
+				self._is_convex=True
 			else:
-				self.__is_convex=False
-		return self.__is_convex
+				self._is_convex=False
+		return self._is_convex
 	
 	# endregion
 	
@@ -475,11 +525,11 @@ class ThePoly(GenericGeometry):
 			if isinstance(res[0],shg.Point): return []
 			for geom in res:
 				if isinstance(geom,shg.LineString) and geom.touches(shg.Point(*xy)):
-					outs.append(TheLine(line=geom,**the_line_kwargs))
+					outs.append(TheLine(geom,**the_line_kwargs))
 		elif isinstance(res,shg.MultiLineString):
 			for geom in res:
 				if geom.touches(shg.Point(*xy)):
-					outs.append(TheLine(line=geom,**the_line_kwargs))
+					outs.append(TheLine(geom,**the_line_kwargs))
 		return outs
 	
 	def get_boustrophedon_lines(self,**the_line_kwargs):
@@ -532,25 +582,24 @@ class ThePoly(GenericGeometry):
 				connections.append([c1,c2])
 				G.add_edge(c1,c2)
 				if show:
-					TheLine(line=shg.LineString([c1_poly.centroid,c2_poly.centroid]),
-					        show=show,c='gray',ls='--')
+					TheLine(shg.LineString([c1_poly.centroid,c2_poly.centroid])).plot(c='gray',ls='--')
 		return cells,G
 	
 	# endregion
 	
 	# def get_convex_hull(self):
-	# 	if self.__convex_hull is None:
+	# 	if self._convex_hull is None:
 	# 		hull=spatial.ConvexHull(self.xy)
 	# 		vertices=np.array(sorted(hull.vertices))
 	# 		# convex_poly=ThePoly(hull.points[hull.vertices]).plot(c='b',alpha=0.5)
 	# 		convex_poly=ThePoly(self.xy[vertices])  #.plot(c='b',alpha=0.5)
-	# 		self.__convex_hull=convex_poly
-	# 	return self.__convex_hull
+	# 		self._convex_hull=convex_poly
+	# 	return self._convex_hull
 	@property
 	def convex_hull(self):
-		if self.__convex_hull is None:
-			self.__convex_hull=self.__class__(self.p.convex_hull)
-		return self.__convex_hull
+		if self._convex_hull is None:
+			self._convex_hull=ThePoly(self.p.convex_hull)
+		return self._convex_hull
 	
 	def __eq__(self,other):
 		if isinstance(other,ThePoly):
@@ -560,3 +609,190 @@ class ThePoly(GenericGeometry):
 	
 	def __len__(self):
 		return len(self.xy)-1
+	
+	def _add_node(self,G,xy,parent_lines,is_intermediate=False):
+		node=ThePoint(xy)
+		l1,l2=parent_lines
+		if is_intermediate:
+			l1.intermediate_points[node]=l2
+			l2.intermediate_points[node]=l1
+		G.add_node(node,lines=parent_lines)
+		return node
+	
+	def _add_edge(self,G,line):
+		G.add_edge(line[0],line[1],line=line)
+		return line
+	
+	def generate_graph(self,parent_graph=None):
+		G=parent_graph or TheGraph()
+		# vertex_angles=self.get_angles_at_vertices()
+		# if self.parent: vertex_angles=360-vertex_angles
+		
+		# point_kwargs=dict()
+		# point_kwargs.update(box_kwargs)
+		# point_kwargs.update(point_opts or {})
+		
+		for i in range(len(self.exterior_lines)):
+			# next_index=(i+1) if i+1==len(lines) else 0
+			# node=ThePoint(self.xy[i])
+			# G.add_node(node,lines=[lines[i],lines[i-1]])
+			self._add_node(G,self.xy[i],parent_lines=[self.exterior_lines[i],self.exterior_lines[i-1]])
+			# next_node=ThePoint(self.xy[next_index])
+			# G.add_edge(node,next_node,line=lines[i])
+			pass
+			# self._add_edge(G,lines[i])
+			pass
+		
+		for hole in self.holes:
+			hole.generate_graph(G)
+		
+		# for i, xy in enumerate(self.xy):
+		# 	G.add_node(i,)
+		
+		# for i,line in enumerate(lines):
+		# 	# G.add_edge(*map(ThePoint,line.xy),line=line)
+		# 	if i+1==len(lines):
+		# 		G.add_edge(i,0,line=line)
+		# 	else:
+		# 		G.add_edge(i,i+1,line=line)
+		return G
+	
+	@property
+	def G(self):
+		if self._graph is None: self._graph=self.generate_graph()
+		return self._graph
+	
+	@with_logging()
+	def get_extension_lines(self,parent=None,show=False):
+		the_main_poly=parent or self  #ThePoly(self.p)#self
+		if self.is_convex:
+			simple_logger.info('The field is convex. Extension lines are absent.')
+			return self
+		
+		delta=self.convex_hull.p.difference(self.p)
+		if delta.is_empty:
+			simple_logger.info('Delta is empty. Skipping.')
+			return self
+		elif isinstance(delta,shg.MultiPolygon):
+			chunks=[TheChunk(x,self,id=f'Chunk-{i}') for i,x in enumerate(delta)]
+		elif isinstance(delta,shg.Polygon):
+			chunks=[TheChunk(delta,self)]
+		else:
+			simple_logger.critical('delta: %s',delta)
+			# self.plot()
+			# self.convex_hull.plot(c='b')
+			# plt.show()
+			raise NotImplementedError
+		
+		out_extension_lines=list()
+		for i_chunk,the_chunk in enumerate(chunks):
+			# if i_chunk!=3: continue
+			chunk_hull=the_chunk.convex_hull  #.plot(c='b',lw=0.5,ls='--',text=f'chunk_hull-{i_chunk}')
+			for i_point,xy in enumerate(the_chunk.xy[:-1]):
+				xy_point=ThePoint(xy,)  #.plot(f'{i_point}')
+				# simple_logger.debug('Point-%s',i_point)
+				# the_chunk.baseline.plot(c='r')
+				if not the_chunk.touches_parent or (chunk_hull.touches(xy) and the_chunk.baseline.line.distance(xy_point.point)>min_dist):
+					# simple_logger.info('Point-%s',i_point)
+					# extension_lines=the_chunk[xy]['extension_lines']=the_main_poly[xy]['extension_lines']=list()
+					extension_lines=the_main_poly[xy]['extension_lines']=list()
+					for i_line,line in enumerate(the_chunk[xy]['lines']):
+						# self.plot()
+						# line: TheLine=line.plot(text=str(i_line))
+						# line[0].plot('Start')
+						# line[1].plot('End')
+						extension_line=line.extend_from(xy,the_main_poly.cover_line_length)  #.plot(text='extension_line')
+						# plt.show()
+						
+						cropped_line=the_main_poly.p.intersection(extension_line.line)
+						# simple_logger.debug('cropped_line:\n%s',cropped_line)
+						if isinstance(cropped_line,shg.MultiLineString):
+							cropped_line=cropped_line[0]
+						elif isinstance(cropped_line,shg.GeometryCollection):
+							continue
+						
+						# self.plot()
+						cropped_extension_line=TheLine(cropped_line)  #.plot()
+						# xy_point.plot(i_point)
+						# cropped_extension_line.plot()
+						# plt.show()
+						if xy_point in cropped_extension_line:
+							if cropped_extension_line.line.length<1e-3:
+								simple_logger.warning('Too short extension line encountered.')
+							extension_lines.append(cropped_extension_line)
+							out_extension_lines.append(cropped_extension_line)
+			
+			geom_collection=chunk_hull.p.intersection(self.p)
+			smaller_chunks=list()
+			for geom_obj in geom_collection:
+				if isinstance(geom_obj,shg.LineString):
+					# TheLine(geom_obj).plot(text='line',c='y')
+					pass
+				elif isinstance(geom_obj,shg.MultiLineString):
+					# [TheLine(x).plot(text='line',c='cyan') for x in geom_obj]
+					pass
+				elif isinstance(geom_obj,shg.Polygon):
+					smaller_chunk=ThePoly(geom_obj)  #.plot(text='ThePoly',c='r')
+					smaller_chunks.append(smaller_chunk)
+				else:
+					simple_logger.debug('geom_obj: %s',geom_obj)
+					raise NotImplementedError
+			
+			for smaller_chunk in smaller_chunks:
+				if not smaller_chunk.is_convex:
+					# the_chunk.plot(f'the_chunk-{i_chunk}')
+					# smaller_chunk.plot('smaller_chunk',c='r',lw=0.3)
+					# smaller_chunk.id="_".join(map(str,[self.id,'smaller_chunk']))
+					# simple_logger.debug('smaller_chunk:\n%s',smaller_chunk)
+					smaller_chunk.get_extension_lines(parent=the_main_poly)
+		
+		if show:
+			for ext_line in out_extension_lines:
+				ext_line.plot()
+		simple_logger.debug('Extension lines count: %s',len(out_extension_lines))
+		return out_extension_lines
+	
+	@property
+	def extension_lines(self):
+		if not self._extension_lines:
+			self._extension_lines=self.get_extension_lines()
+		return self._extension_lines
+	
+	def get_angles_at_vertices(self):
+		vectors=self.xy[1:]-self.xy[:-1]
+		line_angles=np.arctan2(vectors[:,1],vectors[:,0])*180/np.pi
+		line_angles=np.append(line_angles,line_angles[0])
+		angle_diff=((line_angles[1:]-line_angles[:-1])+180)%360
+		angle_at_vertices=np.zeros(angle_diff.shape)
+		angle_at_vertices[0]=angle_diff[-1]
+		angle_at_vertices[1:]=angle_diff[:-1]
+		return angle_at_vertices
+	
+	def __getitem__(self,item):
+		# simple_logger.debug('item: %s',item)
+		if type(item) in (np.ndarray,tuple,list):
+			# if isinstance(item,np.ndarray): item=item.ravel()
+			u,v=item
+			return self.G.nodes[u,v]
+		elif isinstance(item,slice):
+			return [self[ii] for ii in range(*item.indices(len(self)))]
+		elif isinstance(item,int):
+			return self.exterior_lines[item]
+		else:
+			return super().__getitem__(item)
+
+class TheChunk(ThePoly):
+	
+	def __init__(self,polygon,parent,**data):
+		super(TheChunk,self).__init__(polygon=polygon,**data)
+		self.parent: ThePoly=parent
+		self.touches_parent=self.parent.p.exterior.touches(self.p)  # if parent else False
+		self.baseline=None
+		if self.touches_parent:
+			parent_lines=self.parent.get_exterior_lines()
+			for chunk_line in self.get_exterior_lines():
+				if chunk_line not in parent_lines:
+					self.baseline=chunk_line
+					# chunk_line.plot(text='baseline')
+					break
+			assert self.baseline is not None
