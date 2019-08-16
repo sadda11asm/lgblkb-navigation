@@ -1,9 +1,6 @@
-from inspect import signature
-from typing import Union
-from egistic_navigation.base_geometry.point_utils import ThePoint
 import collections
+import functools
 import itertools
-from typing import Iterable
 
 import gc
 import more_itertools as mi
@@ -18,6 +15,7 @@ from sklearn.cluster import KMeans
 
 from egistic_navigation.base_geometry.geom_utils import GenericGeometry,get_from_geojson,line_xy,pathify,is_clockwise,generate_cells,min_dist
 from egistic_navigation.base_geometry.line_utils import TheLine
+from egistic_navigation.base_geometry.point_utils import ThePoint
 from egistic_navigation.global_support import simple_logger
 from egistic_navigation.katana_case import katana
 from egistic_navigation.utils.google_way import SimpleTSP
@@ -36,20 +34,24 @@ class TheNodeView(object):
 
 class TheGraph(nx.Graph):
 	
-	#crop_field.G.nodes[decision_points['inner'][0]]['lines'][1].all_points
+	#crop_field.G.nodes[decision_points['inner'][0]]['lines'][1].get_all_points
 	def __init__(self,incoming_graph_data=None,**attr):
 		super(TheGraph,self).__init__(incoming_graph_data=incoming_graph_data,**attr)
 		self.decision_points=collections.OrderedDict()
 	
-	def inner_node_getter(self,inner_node_index,*keys):
-		result=self.nodes[self.decision_points['inner'][inner_node_index]]
+	def _decision_points_getter(self,decision_key,node_index,*keys):
+		result=self.nodes[self.decision_points[decision_key][node_index]]
 		for key in keys:
 			result=result[key]
 		return result
 	
 	@property
 	def inner_nodes(self):
-		return TheNodeView(self,self.inner_node_getter)
+		return TheNodeView(self,functools.partial(self._decision_points_getter,'inner'))
+	
+	@property
+	def border_nodes(self):
+		return TheNodeView(self,functools.partial(self._decision_points_getter,'border'))
 
 class ThePoly(GenericGeometry):
 	
@@ -58,15 +60,18 @@ class ThePoly(GenericGeometry):
 		
 		if isinstance(polygon,shg.Polygon):
 			self.polygon: shg.Polygon=polygon
+		elif isinstance(polygon,ThePoly):
+			self.polygon: shg.Polygon=polygon.polygon
 		else:
 			self.polygon: shg.Polygon=shg.Polygon(polygon)
-		self._generate_id(self.polygon)
+		# if not self.geometry.area==0: self.polygon=self.polygon.buffer(0)
 		if not self.p.is_valid:
 			# self.plot()
 			# plt.show()
 			# raise AssertionError(f"Polygon {self.polygon} is not a valid polygon.")
-			simple_logger.warning(f"Polygon %s is not a valid polygon.",self.polygon)
-		
+			# simple_logger.warning(f"Polygon %s is not a valid polygon.",self.polygon)
+			pass
+		# self._generate_id()
 		self._xy=None
 		self._holes=None
 		self._cover_line_length=None
@@ -74,7 +79,8 @@ class ThePoly(GenericGeometry):
 		self._lims=None
 		self._is_ok=None
 		self._isclockwise=None
-		self.is_multilinestring=isinstance(self.polygon.boundary,shg.MultiLineString)
+		if self.polygon.is_empty: self.is_multilinestring=False
+		else: self.is_multilinestring=isinstance(self.polygon.boundary,shg.MultiLineString)
 		
 		self._is_convex=None
 		self._convex_hull=None
@@ -86,8 +92,22 @@ class ThePoly(GenericGeometry):
 		self._graph=None
 		self._points=list()
 		self._all_points=list()
+		self._intersection_points=dict()
+		self._all_lines=list()
 		self._extension_lines=list()
+		self._angles_at_vertices=None
 		self.data=Box(data)
+	
+	@property
+	def is_empty(self):
+		return self.geometry.is_empty
+	
+	def get_simplified(self,tolerance=1e-9):
+		return self.__class__(self.geometry.simplify(tolerance))
+	
+	@property
+	def geometry(self):
+		return self.polygon
 	
 	# region Class methods:
 	@classmethod
@@ -101,12 +121,14 @@ class ThePoly(GenericGeometry):
 		return the_poly
 	
 	@classmethod
-	def synthesize(cls,cities_count,poly_extent=1000,hole_count=1,seed=None):
+	def synthesize(cls,cities_count,poly_extent=1000,hole_count=1,seed=None,hole_cities_count=None):
+		if seed is None: seed=np.random.randint(0,int(1e6))
+		simple_logger.info('seed: %s',seed)
 		np.random.seed(seed)
 		try_count=0
 		while True:
 			try_count+=1
-			simple_logger.info('Try main_poly: %s',try_count)
+			simple_logger.debug('Try main_poly: %s',try_count)
 			seed=np.random.randint(100000000)
 			try:
 				unholy_field=cls.from_tsp(cities_count=cities_count,seed=seed,city_locator=lambda ps:ps*poly_extent)
@@ -117,7 +139,7 @@ class ThePoly(GenericGeometry):
 				for i in range(1000):
 					#.plot()
 					seed=np.random.randint(100000000)
-					hole=cls.from_tsp(cities_count=np.random.randint(4,10),seed=seed,
+					hole=cls.from_tsp(cities_count=hole_cities_count or np.random.randint(4,10),seed=seed,
 					                  city_locator=lambda ps:ps*np.random.randint(poly_extent/20,poly_extent*0.3)+
 					                                         np.random.randint(poly_extent*0.1,poly_extent*0.9,2))
 					# holy_poly=shg.Polygon(unholy_field.xy,[hole.xy,*map(lambda h:h.xy,holes)])
@@ -183,6 +205,35 @@ class ThePoly(GenericGeometry):
 	@classmethod
 	def from_geojson(cls,filepath,**box_kwargs):
 		return cls(get_from_geojson(filepath)[0],**box_kwargs)
+	
+	@classmethod
+	def as_valid(cls,raw_polygon):
+		raw_poly=ThePoly(raw_polygon)
+		# for i, valid_point in enumerate(raw_poly.points):
+		# 	valid_point.plot(f'P-{i}')
+		invalid_point_indexes=list()
+		for i,angle in enumerate(raw_poly.angles_at_vertices):
+			# simple_logger.debug('angle: %s',angle)
+			if angle%360<min_dist:
+				# simple_logger.info('i: %s',i)
+				invalid_point_indexes.append(i)
+		
+		# invalid_line_indexes.append(i-1)
+		# for neighbor_index in [i-1,i+1]:
+		# # neighbor_index=i-1
+		# 	if raw_poly[i].angle-raw_poly[neighbor_index].angle<min_dist:
+		# 		invalid_line_indexes.append(neighbor_index)
+		# 		break
+		
+		valid_points=[x for i,x in enumerate(raw_poly.points) if not i in invalid_point_indexes]
+		# for i, valid_point in enumerate(valid_points):
+		# 	valid_point.plot(f'P-{i}')
+		
+		valid_poly=cls(valid_points)  #.plot(c='r')
+		if len(valid_poly)!=len(raw_poly):
+			return cls.as_valid(valid_poly)
+		else:
+			return valid_poly
 	
 	# endregion
 	
@@ -264,15 +315,33 @@ class ThePoly(GenericGeometry):
 		return self._points
 	
 	@property
-	def poly_points(self):
+	def all_points(self):
 		if not self._all_points:
 			self._all_points=[ThePoint(xy) for xy in self.all_xy]
 		return self._all_points
+	
+	@property
+	def all_lines(self):
+		if not self._all_lines:
+			self._all_lines=[*self.exterior_lines,*mi.flatten([x.exterior_lines for x in self.holes])]
+		return self._all_lines
 	
 	def get_exterior_lines(self,as_the_line=True,show=0):
 		lines=list()
 		if as_the_line: line_getter=lambda _line:TheLine(_line)
 		else: line_getter=lambda _line:_line
+		
+		if self.is_multilinestring:
+			is_ok=False
+			for _ in self.polygon.boundary:
+				is_ok=True
+				break
+			if not is_ok:
+				simple_logger.critical('self.geometry:\n%s',self.geometry)
+				for p in self.points: p.plot()
+				simple_logger.critical('len(self.points): %s',len(self.points))
+				plt.show()
+		
 		current_chunk=self.polygon.boundary[0] if self.is_multilinestring else self.polygon.boundary
 		for xy in self.xy[1:-1]:
 			# ThePoint(xy).plot()
@@ -298,50 +367,59 @@ class ThePoly(GenericGeometry):
 			self._cover_line_length=np.linalg.norm(delta)*1.01
 		return self._cover_line_length
 	
-	def get_field_lines(self,offset_distance,border_index=None,show=0):
-		# if border_index is None: slicer=lambda x:x[:]
-		# elif isinstance(border_index,Iterable): slicer=lambda x:[x[_i] for _i in border_index]
-		# else: slicer=lambda x:x[border_index]
-		if border_index!=0 and not border_index: checker=lambda x:True
-		elif isinstance(border_index,Iterable): checker=lambda x:x in border_index
-		else: checker=lambda x:x==border_index
-		borderlines=[TheLine(x,width=offset_distance/2) for x in
-		             self.buffer(-1e-6,join_style=shg.JOIN_STYLE.mitre).get_exterior_lines(as_the_line=False,show=0)]
-		field_lines_data=collections.defaultdict(list)
-		for i,borderline in enumerate(borderlines):
-			if not checker(i): continue
-			counter=0
-			offset_lines=borderline.get_field_lines(self)
-			offset_lines.extend(borderline.offset_by(offset_distance,int(np.ceil(self.cover_line_length/offset_distance))))
-			offset_lines.extend(borderline.offset_by(-offset_distance,int(np.ceil(self.cover_line_length/offset_distance))))
-			for offset_line in offset_lines:
-				field_lines=offset_line.get_field_lines(self)
-				if not field_lines:
-					continue
-				for field_line in field_lines:
-					if not field_line: continue
-					
-					counter+=1
-					field_lines_data[i].append(field_line)
-			# if i==0 or i==1:
-			# 	field_line.plot('100',c='magenta',alpha=0.5)
-			simple_logger.info('counter: %s',counter)
-		
-		if show:
-			fig=plt.gcf()
-			fig.set_size_inches(16,9,forward=True)
-			for i,b in enumerate(borderlines):
-				if not checker(i): continue
-				self.plot()
-				boundary_label=f'Boundary_{i}'
-				b.plot('1001',text=boundary_label)
-				df=pd.DataFrame(field_lines_data[i],columns=[boundary_label])
-				df['length']=df.applymap(lambda x:x.line.length)
-				df[boundary_label].map(lambda x:x.plot('100',c='magenta',alpha=0.5))
-		# df['length'].plot.hist()
-		# plt.text(*np.array(self.polygon.centroid.xy),df.shape[0])
-		# plt.show()
-		return field_lines_data
+	# def get_field_lines(self,offset_distance,border_index=None,show=0):
+	# 	# if border_index is None: slicer=lambda x:x[:]
+	# 	# elif isinstance(border_index,Iterable): slicer=lambda x:[x[_i] for _i in border_index]
+	# 	# else: slicer=lambda x:x[border_index]
+	# 	if border_index!=0 and not border_index: checker=lambda x:True
+	# 	elif isinstance(border_index,Iterable): checker=lambda x:x in border_index
+	# 	else: checker=lambda x:x==border_index
+	# 	borderlines=[TheLine(x,width=offset_distance/2) for x in
+	# 	             self.buffer(-1e-8,join_style=shg.JOIN_STYLE.mitre).get_exterior_lines(as_the_line=False,show=0)]
+	# 	field_lines_data=collections.defaultdict(list)
+	# 	for i,borderline in enumerate(borderlines):
+	# 		if not checker(i): continue
+	# 		counter=0
+	# 		offset_lines=borderline.get_field_lines(self)
+	# 		offset_lines.extend(borderline.offset_by(offset_distance,int(np.ceil(self.cover_line_length/offset_distance))))
+	# 		offset_lines.extend(borderline.offset_by(-offset_distance,int(np.ceil(self.cover_line_length/offset_distance))))
+	#
+	# 		for offset_line in offset_lines:
+	# 			# offset_line.plot()
+	#
+	# 			field_lines=offset_line.get_field_lines(self)
+	# 			if not field_lines:
+	# 				continue
+	# 			for field_line in field_lines:
+	# 				if not field_line: continue
+	#
+	# 				counter+=1
+	# 				field_lines_data[i].append(field_line)
+	# 	# plt.show()
+	# 	# if i==0 or i==1:
+	# 	# 	field_line.plot('100',c='magenta',alpha=0.5)
+	# 	# simple_logger.info('counter: %s',counter)
+	# 	fl_counters=[len(x) for x in field_lines_data.values()]
+	# 	simple_logger.debug('# of field lines along borders: %s',fl_counters)
+	#
+	# 	if show:
+	# 		# fig=plt.gcf()
+	# 		# fig.set_size_inches(16,9,forward=True)
+	# 		for i,b in enumerate(borderlines):
+	# 			if not checker(i): continue
+	# 			# self.plot()
+	# 			boundary_label=f'Boundary_{i}'
+	# 			b.plot('1001',text=boundary_label)
+	# 			# df=pd.DataFrame(field_lines_data[i],columns=[boundary_label])
+	# 			# df['length']=df.applymap(lambda x:x.line.length)
+	# 			# df[boundary_label].map(lambda x:x.plot('100',c='magenta',alpha=0.5))
+	# 			for field_line in field_lines_data[i]:
+	# 				field_line.plot()
+	#
+	# 	# df['length'].plot.hist()
+	# 	# plt.text(*np.array(self.polygon.centroid.xy),df.shape[0])
+	# 	# plt.show()
+	# 	return field_lines_data
 	
 	@property
 	def lims(self):
@@ -385,31 +463,31 @@ class ThePoly(GenericGeometry):
 			for p in polygons: gmtr.plot_polygon(p,**kwargs)
 		return polygons
 	
-	def get_interior_points(self,distance,border_index=None,show=0):
-		lines=collections.defaultdict(list)
-		if border_index is None:
-			# field_box=ThePoly(self.polygon.envelope)
-			for i,box_lines in self.get_field_lines(distance,[0,1]).items():
-				for bl in box_lines:
-					lines[i].append(bl)
-		else:
-			for i,field_lines in self.get_field_lines(distance,border_index).items():
-				for bl in field_lines:
-					lines[i].append(bl)
-		the_data=pd.DataFrame(lines[(border_index[-1] if border_index is not None else 1)],columns=['line2s'])
-		intersection_points=list()
-		for l1 in lines[0]:
-			points=the_data['line2s'].apply(lambda l2:l2.line.intersection(l1.line))
-			not_empty_ones=points.apply(lambda x:isinstance(x,shg.Point))
-			good_points=points[not_empty_ones]
-			if good_points.empty: continue
-			intersection_points.extend(good_points.tolist())
-		ps=pd.Series(intersection_points)
-		out=np.array(list(mi.flatten(ps.apply(lambda p:line_xy(p)))))
-		if show:
-			plt.scatter(out[:,0],out[:,1])
-			pass
-		return out
+	# def get_interior_points(self,distance,border_index=None,show=0):
+	# 	lines=collections.defaultdict(list)
+	# 	if border_index is None:
+	# 		# field_box=ThePoly(self.polygon.envelope)
+	# 		for i,box_lines in self.get_field_lines(distance,[0,1]).items():
+	# 			for bl in box_lines:
+	# 				lines[i].append(bl)
+	# 	else:
+	# 		for i,field_lines in self.get_field_lines(distance,border_index).items():
+	# 			for bl in field_lines:
+	# 				lines[i].append(bl)
+	# 	the_data=pd.DataFrame(lines[(border_index[-1] if border_index is not None else 1)],columns=['line2s'])
+	# 	intersection_points=list()
+	# 	for l1 in lines[0]:
+	# 		points=the_data['line2s'].apply(lambda l2:l2.line.intersection(l1.line))
+	# 		not_empty_ones=points.apply(lambda x:isinstance(x,shg.Point))
+	# 		good_points=points[not_empty_ones]
+	# 		if good_points.empty: continue
+	# 		intersection_points.extend(good_points.tolist())
+	# 	ps=pd.Series(intersection_points)
+	# 	out=np.array(list(mi.flatten(ps.apply(lambda p:line_xy(p)))))
+	# 	if show:
+	# 		plt.scatter(out[:,0],out[:,1])
+	# 		pass
+	# 	return out
 	
 	@with_logging()
 	def generate_clusters(self,grid_resolution,n_clusters,show=''):
@@ -450,7 +528,7 @@ class ThePoly(GenericGeometry):
 		pixel_count=np.ceil(delta/resolution)[::-1].astype(int)
 		simple_logger.info('pixel_count: %s',pixel_count)
 		img_array=np.zeros(shape=pixel_count)
-		interior_points=np.round(self.get_interior_points(resolution),decimals=1)[:,[1,0]]
+		interior_points=np.round(self.generate_grid_points(resolution),decimals=1)[:,[1,0]]
 		positions_in_grid=np.floor(interior_points/resolution).astype(int)
 		positions_in_grid=np.clip(positions_in_grid,a_min=[0,0],a_max=np.array(img_array.shape)-1)
 		img_array[positions_in_grid[:,0],positions_in_grid[:,1]]=1
@@ -477,7 +555,8 @@ class ThePoly(GenericGeometry):
 		elif area<0:
 			self._isclockwise=False
 		else:
-			simple_logger.info('self.polygon:\n%s',self.polygon)
+			simple_logger.warning('self.polygon:\n%s',self.polygon)
+			# self._isclockwise=None
 			raise NotImplementedError('Area is zero.')
 		return self._isclockwise
 	
@@ -504,13 +583,26 @@ class ThePoly(GenericGeometry):
 	def touches(self,xy):
 		return self.polygon.touches(shg.Point(xy))
 	
+	def as_noncollinear(self):
+		non_collinear_points=list()
+		for i_vertex,angle_at_vertex in enumerate(self.angles_at_vertices):
+			if abs(angle_at_vertex-180)<min_dist: continue
+			non_collinear_points.append(self.points[i_vertex])
+		non_collinear_field=self.__class__(non_collinear_points)
+		return non_collinear_field
+	
 	@property
 	def is_convex(self):
 		if self._is_convex is None:
-			if abs(self.p.area-self.convex_hull.p.area)<min_dist:
-				self._is_convex=True
-			else:
-				self._is_convex=False
+			self._is_convex=True
+			for angle_at_vertex in self.angles_at_vertices:
+				if angle_at_vertex>180+min_dist:
+					self._is_convex=False
+					break
+		# if abs(self.p.area-self.convex_hull.p.area)<min_dist:
+		# 	self._is_convex=True
+		# else:
+		# 	self._is_convex=False
 		return self._is_convex
 	
 	# endregion
@@ -598,14 +690,34 @@ class ThePoly(GenericGeometry):
 	@property
 	def convex_hull(self):
 		if self._convex_hull is None:
-			self._convex_hull=ThePoly(self.p.convex_hull)
+			# simple_logger.debug('self.xy:\n%s',self.xy)
+			if self.p.convex_hull.is_empty:
+				# self.plot()
+				# plt.show()
+				simple_logger.warning('Empty hull')
+				self._convex_hull=ThePoly(shg.Polygon())
+			else:
+				self._convex_hull=ThePoly(self.p.convex_hull)
 		return self._convex_hull
 	
 	def __eq__(self,other):
+		# if isinstance(other,ThePoly):
+		# 	return self.id==other.id
+		# else:
+		# 	return self.id==ThePoly(other).id
+		# is_equal=True
 		if isinstance(other,ThePoly):
-			return self.id==other.id
+			other_points=other.points
 		else:
-			return self.id==ThePoly(other).id
+			other_points=ThePoly(other).points
+		
+		other_points_copy=other_points[:]
+		for point in self.points:
+			if not point in other_points_copy:
+				return False
+			other_points_copy.remove(point)
+		if other_points_copy: return False
+		return True
 	
 	def __len__(self):
 		return len(self.xy)-1
@@ -614,8 +726,10 @@ class ThePoly(GenericGeometry):
 		node=ThePoint(xy)
 		l1,l2=parent_lines
 		if is_intermediate:
-			l1.intermediate_points[node]=l2
-			l2.intermediate_points[node]=l1
+			if not node in l1:
+				l1.intermediate_points[node.associate_with_lines(l1,l2)]=l2
+			if not node in l2:
+				l2.intermediate_points[node.associate_with_lines(l1,l2)]=l1
 		G.add_node(node,lines=parent_lines)
 		return node
 	
@@ -662,101 +776,19 @@ class ThePoly(GenericGeometry):
 		if self._graph is None: self._graph=self.generate_graph()
 		return self._graph
 	
-	@with_logging()
-	def get_extension_lines(self,parent=None,show=False):
-		the_main_poly=parent or self  #ThePoly(self.p)#self
-		if self.is_convex:
-			simple_logger.info('The field is convex. Extension lines are absent.')
-			return self
-		
-		delta=self.convex_hull.p.difference(self.p)
-		if delta.is_empty:
-			simple_logger.info('Delta is empty. Skipping.')
-			return self
-		elif isinstance(delta,shg.MultiPolygon):
-			chunks=[TheChunk(x,self,id=f'Chunk-{i}') for i,x in enumerate(delta)]
-		elif isinstance(delta,shg.Polygon):
-			chunks=[TheChunk(delta,self)]
-		else:
-			simple_logger.critical('delta: %s',delta)
-			# self.plot()
-			# self.convex_hull.plot(c='b')
-			# plt.show()
-			raise NotImplementedError
-		
-		out_extension_lines=list()
-		for i_chunk,the_chunk in enumerate(chunks):
-			# if i_chunk!=3: continue
-			chunk_hull=the_chunk.convex_hull  #.plot(c='b',lw=0.5,ls='--',text=f'chunk_hull-{i_chunk}')
-			for i_point,xy in enumerate(the_chunk.xy[:-1]):
-				xy_point=ThePoint(xy,)  #.plot(f'{i_point}')
-				# simple_logger.debug('Point-%s',i_point)
-				# the_chunk.baseline.plot(c='r')
-				if not the_chunk.touches_parent or (chunk_hull.touches(xy) and the_chunk.baseline.line.distance(xy_point.point)>min_dist):
-					# simple_logger.info('Point-%s',i_point)
-					# extension_lines=the_chunk[xy]['extension_lines']=the_main_poly[xy]['extension_lines']=list()
-					extension_lines=the_main_poly[xy]['extension_lines']=list()
-					for i_line,line in enumerate(the_chunk[xy]['lines']):
-						# self.plot()
-						# line: TheLine=line.plot(text=str(i_line))
-						# line[0].plot('Start')
-						# line[1].plot('End')
-						extension_line=line.extend_from(xy,the_main_poly.cover_line_length)  #.plot(text='extension_line')
-						# plt.show()
-						
-						cropped_line=the_main_poly.p.intersection(extension_line.line)
-						# simple_logger.debug('cropped_line:\n%s',cropped_line)
-						if isinstance(cropped_line,shg.MultiLineString):
-							cropped_line=cropped_line[0]
-						elif isinstance(cropped_line,shg.GeometryCollection):
-							continue
-						
-						# self.plot()
-						cropped_extension_line=TheLine(cropped_line)  #.plot()
-						# xy_point.plot(i_point)
-						# cropped_extension_line.plot()
-						# plt.show()
-						if xy_point in cropped_extension_line:
-							if cropped_extension_line.line.length<1e-3:
-								simple_logger.warning('Too short extension line encountered.')
-							extension_lines.append(cropped_extension_line)
-							out_extension_lines.append(cropped_extension_line)
-			
-			geom_collection=chunk_hull.p.intersection(self.p)
-			smaller_chunks=list()
-			for geom_obj in geom_collection:
-				if isinstance(geom_obj,shg.LineString):
-					# TheLine(geom_obj).plot(text='line',c='y')
-					pass
-				elif isinstance(geom_obj,shg.MultiLineString):
-					# [TheLine(x).plot(text='line',c='cyan') for x in geom_obj]
-					pass
-				elif isinstance(geom_obj,shg.Polygon):
-					smaller_chunk=ThePoly(geom_obj)  #.plot(text='ThePoly',c='r')
-					smaller_chunks.append(smaller_chunk)
-				else:
-					simple_logger.debug('geom_obj: %s',geom_obj)
-					raise NotImplementedError
-			
-			for smaller_chunk in smaller_chunks:
-				if not smaller_chunk.is_convex:
-					# the_chunk.plot(f'the_chunk-{i_chunk}')
-					# smaller_chunk.plot('smaller_chunk',c='r',lw=0.3)
-					# smaller_chunk.id="_".join(map(str,[self.id,'smaller_chunk']))
-					# simple_logger.debug('smaller_chunk:\n%s',smaller_chunk)
-					smaller_chunk.get_extension_lines(parent=the_main_poly)
-		
-		if show:
-			for ext_line in out_extension_lines:
-				ext_line.plot()
-		simple_logger.debug('Extension lines count: %s',len(out_extension_lines))
-		return out_extension_lines
-	
-	@property
-	def extension_lines(self):
-		if not self._extension_lines:
-			self._extension_lines=self.get_extension_lines()
-		return self._extension_lines
+	def generate_intersection_points(self,lines):
+		intersection_points=list()
+		for l1,l2 in itertools.combinations(lines,2):
+			if l1[0]==l2[0]: continue
+			result=l1.line.intersection(l2.line)
+			if result.is_empty: continue
+			the_point=ThePoint(result)
+			self._add_node(self.G,the_point,[l1,l2],is_intermediate=True)
+			# self.G.add_node(the_point,lines=[l1,l2])
+			intersection_points.append(the_point)
+		# intersection_points=set(intersection_points)
+		simple_logger.info('intersection_points count: %s',len(intersection_points))
+		return intersection_points
 	
 	def get_angles_at_vertices(self):
 		vectors=self.xy[1:]-self.xy[:-1]
@@ -766,7 +798,16 @@ class ThePoly(GenericGeometry):
 		angle_at_vertices=np.zeros(angle_diff.shape)
 		angle_at_vertices[0]=angle_diff[-1]
 		angle_at_vertices[1:]=angle_diff[:-1]
-		return angle_at_vertices
+		if self.is_clockwise:
+			return angle_at_vertices
+		else:
+			return 360-angle_at_vertices
+	
+	@property
+	def angles_at_vertices(self):
+		if self._angles_at_vertices is None:
+			self._angles_at_vertices=self.get_angles_at_vertices()
+		return self._angles_at_vertices
 	
 	def __getitem__(self,item):
 		# simple_logger.debug('item: %s',item)

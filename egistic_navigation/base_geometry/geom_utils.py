@@ -48,17 +48,21 @@ def normalize(a):
 def plot_line(line):
 	return plt.plot(*line.xy,lw=5)
 
+round_decimals=6
+min_dist=1e-6
+
 class GenericGeometry(object):
 	
 	def __init__(self,**data):
 		self.data=Box(data,ordered_box=True)
-		self.id=uuid.uuid4()
+		# self.id=uuid.uuid4()
+		
 	
-	def _generate_id(self,id_obj):
-		self.id=self.data.pop('id',gsup.get_md5(str(id_obj)))
+	# def _generate_id(self,id_obj=None):
+	# 	self.id=self.data.pop('id',gsup.get_md5(str(id_obj or self.geometry)))
 	
 	def __repr__(self):
-		return "\n".join([gsup.reprer(self)])
+		return f"{self.__class__.__name__}: {self.geometry}"
 	
 	def __getitem__(self,item):
 		# simple_logger.debug('item: %s',item)
@@ -66,6 +70,12 @@ class GenericGeometry(object):
 		# raise KeyError('Invalid key provided.',dict(key=item,key_type=type(item)))
 		pass
 	
+	@property
+	def geometry(self):
+		raise NotImplementedError
+	
+	def almost_touches(self,other):
+		return self.geometry.distance(other.geometry)<min_dist
 
 def line_xy(linestring):
 	return np.array(linestring.xy).T
@@ -160,9 +170,6 @@ def get_from_geojson(filepath):
 	geojson_data=geojson.load(open(filepath),)
 	geoms=[shg.shape(x['geometry']).buffer(0) for x in geojson_data['features']]
 	return geoms
-
-round_decimals=6
-min_dist=1e-6
 
 def main():
 	pass

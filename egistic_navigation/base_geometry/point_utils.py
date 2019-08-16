@@ -11,6 +11,10 @@ from egistic_navigation.base_geometry.geom_utils import GenericGeometry,min_dist
 
 class ThePoint(GenericGeometry):
 	
+	@property
+	def geometry(self):
+		return self.point
+	
 	def __init__(self,xy,**data):
 		super(ThePoint,self).__init__(**data)
 		if isinstance(xy,shg.Point): xy=xy.x,xy.y
@@ -18,8 +22,13 @@ class ThePoint(GenericGeometry):
 		if len(xy)<2: raise ValueError('Invalid xy.',dict(xy=str(xy),type=str(type(xy))))
 		self.xy=np.array(xy)
 		self.tup_xy=tuple(xy)
-		self._generate_id(self.tup_xy)
+		# self._generate_id(self.tup_xy)
 		self.__unit=None
+		self.associated_lines=list()
+	
+	def associate_with_lines(self,*lines):
+		self.associated_lines.extend(lines)
+		return self
 	
 	@property
 	def x(self):
@@ -49,9 +58,10 @@ class ThePoint(GenericGeometry):
 	
 	def __eq__(self,other):
 		if isinstance(other,ThePoint):
-			return self.point.distance(other.point)<min_dist
+			# return self.point.distance(other.point)<min_dist
+			return self.almost_touches(other)
 		else:
-			return self.point.distance(ThePoint(other).point)<min_dist
+			return self.almost_touches(ThePoint(other))  #.point.distance(ThePoint(other).point)<min_dist
 		
 		# elif isinstance(other,ThePoint):
 		# 	return self.tup_xy==other.tup_xy
@@ -91,3 +101,11 @@ class ThePoint(GenericGeometry):
 			return [self[ii] for ii in range(*item.indices(len(self.xy)))]
 		# simple_logger.debug('self.xy[item]: %s',self.xy[item])
 		return self.xy[item]
+	
+	def __gt__(self, other):
+		other_associated_lines=other.associated_lines
+		for line in self.associated_lines:
+			if line in other_associated_lines:
+				return line[0].point.distance(self.point)>line[0].point.distance(other.point)
+			
+		
