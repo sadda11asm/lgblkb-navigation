@@ -13,10 +13,9 @@ from egistic_navigation.base_geometry.geom_utils import min_dist
 from egistic_navigation.base_geometry.line_utils import TheLine
 from egistic_navigation.base_geometry.point_utils import ThePoint
 from egistic_navigation.base_geometry.poly_utils import ThePoly
-from egistic_navigation.field_geometry.field_utils import FieldPoly,dfs_paths
-
-from egistic_navigation.global_support import simple_logger,with_logging
-from lgblkb_tools.databases.sqla_orms import Cadastres_Info
+from egistic_navigation.field_geometry.field_utils import FieldPoly,get_paths
+from egistic_navigation.global_support import simple_logger
+# from lgblkb_tools.db_utils.sqla_orms import Cadastres_Info
 import visvalingamwyatt as vw
 
 def check_cases(seed=None,region_extent=1e6,show=False):
@@ -35,19 +34,19 @@ def check_cases(seed=None,region_extent=1e6,show=False):
 			plt.text(*ThePoint(crop_field.p.centroid),i)
 			plt.show()
 
-def choose_cadastres():
-	cad_infos=gsup.mgr.session.query(Cadastres_Info).filter(Cadastres_Info.area>1e-3).limit(1000).all()
-	for cad_info in cad_infos:
-		simple_logger.debug('cad_info:\n%s',cad_info)
-		sg=gmtr.SpatialGeom(to_shape(cad_info.geom)).convert_crs(4326,3857)
-		has_interior=False
-		for i in sg.geom_obj[0].interiors:
-			has_interior=True
-			break
-		if not has_interior: continue
-		sg.plot()
-		# print(cad_infos)
-		plt.show()
+# def choose_cadastres():
+# 	cad_infos=gsup.mgr.session.query(Cadastres_Info).filter(Cadastres_Info.area>1e-3).limit(1000).all()
+# 	for cad_info in cad_infos:
+# 		simple_logger.debug('cad_info:\n%s',cad_info)
+# 		sg=gmtr.SpatialGeom(to_shape(cad_info.geom)).convert_crs(4326,3857)
+# 		has_interior=False
+# 		for i in sg.geom_obj[0].interiors:
+# 			has_interior=True
+# 			break
+# 		if not has_interior: continue
+# 		sg.plot()
+# 		# print(cad_infos)
+# 		plt.show()
 
 def save_current_figure(filepath,clear_after=True):
 	plt.savefig(filepath,dpi=300,facecolor='w',edgecolor='w',
@@ -115,7 +114,7 @@ def calculate_field_cost(solution_field,offset_distance,error_cost,show=False):
 		field_cost=error_cost
 	return field_cost
 
-@with_logging()
+@simple_logger.wrap()
 def get_the_best_solution(crop_field,offset_distance,save_folder,show,):
 	# field_lines=crop_field.get_optimal_field_lines(offset_distance,show=show)
 	# field_lines=crop_field.get_optimal_field_lines(offset_distance,show=show)
@@ -189,7 +188,7 @@ def get_the_best_solution(crop_field,offset_distance,save_folder,show,):
 	
 	return min_cost,set_of_fields.solutions[min_cost][0]
 
-@with_logging()
+@simple_logger.wrap()
 def save_solution(solution_cost,solution_fields,save_folder,offset_distance,savename='solution'):
 	# plt.clf()
 	for i_solution_field,solution_field in enumerate(solution_fields):
@@ -203,7 +202,7 @@ def save_solution(solution_cost,solution_fields,save_folder,offset_distance,save
 	if not clear_figure_after_plot: plt.show()
 	return filepath
 
-@with_logging()
+@simple_logger.wrap()
 def search_for_solution(crop_field,offset_distance,save_folder,show):
 	solution_cost,solution_fields=get_the_best_solution(crop_field,offset_distance,save_folder,show=show)
 	
@@ -237,9 +236,11 @@ def search_for_solution(crop_field,offset_distance,save_folder,show):
 
 def run_single(cities_count,i_field,the_seed):
 	crop_field=FieldPoly.synthesize(cities_count=cities_count,poly_extent=2000,seed=the_seed,
-	                                hole_count=5,hole_cities_count=None)
+	                                hole_count=0,hole_cities_count=None)
 	# geojson_path=r'/home/lgblkb/PycharmProjects/egistic_navigation/scripts/nav_test.geojson'
 	# crop_field=FieldPoly.from_geojson(geojson_path)
+	crop_field.plot()
+	plt.show()
 	crop_field.plot()
 	save_folder=base_folder.create(field=i_field,cities_count=cities_count,the_seed=the_seed)
 	simple_logger.info('save_folder:\n%s',save_folder)
@@ -273,7 +274,7 @@ def run_single(cities_count,i_field,the_seed):
 # if not clear_figure_after_plot: plt.show()
 
 
-@with_logging()
+@simple_logger.wrap()
 def main():
 	# geojson_path=r'/home/lgblkb/PycharmProjects/egistic_navigation/scripts/nav_test.geojson'
 	# crop_field=FieldPoly.from_geojson(geojson_path)
@@ -324,7 +325,7 @@ def main():
 	# plt.show()
 	pass
 	# return
-	run_single(50,0,np.random.randint(0,99999999))
+	run_single(10,2,np.random.randint(0,99999999))
 	# run_single(15,0,93776577)
 	return
 	

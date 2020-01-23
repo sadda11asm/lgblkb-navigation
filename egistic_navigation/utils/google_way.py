@@ -8,7 +8,7 @@ import ortools
 import matplotlib.pyplot as plt
 import scipy.spatial.distance as scispd
 import scipy.spatial as scisp
-from egistic_navigation.global_support import simple_logger,with_logging
+from egistic_navigation.global_support import simple_logger
 import egistic_navigation.global_support as gsup
 from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
@@ -76,7 +76,7 @@ class SimpleTSP(object):
 			plt.show()
 		return nodes
 
-@with_logging()
+@simple_logger.wrap()
 def main():
 	points=np.random.rand(100,2)*100
 	stsp=SimpleTSP(points)

@@ -1,4 +1,6 @@
 import collections
+import functools
+
 import numpy as np
 from matplotlib import pyplot as plt
 from shapely import geometry as shg
@@ -7,16 +9,27 @@ from egistic_navigation.base_geometry.geom_utils import GenericGeometry,line_xy,
 from egistic_navigation.base_geometry.point_utils import ThePoint
 
 from egistic_navigation.global_support import simple_logger
+from egistic_navigation.global_support import logger
 from lgblkb_tools import geometry as gmtr
 from sortedcontainers import SortedDict
 
 class TheLine(GenericGeometry):
-	
+
 	def __init__(self,coordinates=None,width=2.0,show='',line=None,text=None,**data):
 		super(TheLine,self).__init__(**data)
 		if isinstance(coordinates,shg.LineString): line=coordinates
 		elif isinstance(coordinates,TheLine): line=coordinates.line
-		self.line=line or shg.LineString(coordinates=coordinates)
+		elif isinstance(coordinates,np.ndarray):
+			assert coordinates.shape[0]>1
+		elif isinstance(coordinates,list):
+			assert len(coordinates)>1
+		else:
+			raise NotImplementedError(f'type = {type(coordinates)}, value={coordinates}')
+		try:
+			self.line=line or shg.LineString(coordinates=coordinates)
+		except AssertionError:
+			logger.debug('coordinates:\n%s',coordinates)
+			raise
 		# self.line=get_rounded(self.line,decimals=round_decimals)
 		# self._generate_id()
 		self.width=width
@@ -33,20 +46,22 @@ class TheLine(GenericGeometry):
 		self.intermediate_points=SortedDict()
 		# if show: self.plot(show,**plot_kwargs)
 		pass
-	
+
 	@property
 	def geometry(self):
 		return self.line
-	
+
 	def get_all_points(self):
+		# return [self[0],*self.intermediate_points,self[1]]
 		return [self[0],*self.intermediate_points,self[1]]
-	
+		pass
+
 	@property
 	def coverage(self):
 		if self._coverage is None:
 			self._coverage=self.line.buffer(self.width,cap_style=shg.CAP_STYLE.round)
 		return self._coverage
-	
+
 	def plot(self,showcode='',show_self=1,show_normal=0,show_coverage=0,show_text=None,text='',**kwargs):
 		get_showcode=lambda:[int(x) if x is not None else None for x in showcode]
 		if showcode:
@@ -80,84 +95,98 @@ class TheLine(GenericGeometry):
 			# plt.annotate(text or self.text,a,rotation=trans_angle*180/np.pi,rotation_mode='anchor')
 			plt.text(*ThePoint(self.line.centroid),text or self.text)
 		return self
-	
+
 	def get_normal_line(self,as_the_line=True,width=None):
 		normal_vector=self.perp*(width or self.width)
 		normal_line=np.array([self.midpoint-normal_vector,self.midpoint+normal_vector])
 		return TheLine(normal_line,width=self.width) if as_the_line else normal_line
-	
+
 	def get_cover_line(self,cover_line_length):
 		return self.get_normal_line().get_normal_line(width=cover_line_length)
-	
+
 	def get_field_lines(self,field_polygon,as_the_line=True):
+		field_polygon=field_polygon.as_valid(field_polygon.geometry)
+		some_line=self.get_cover_line(field_polygon.cover_line_length).line
 		try:
-			lines=field_polygon.polygon.intersection(self.get_cover_line(field_polygon.cover_line_length).line)
-		except Exception as exc:
-			simple_logger.warning(str(exc),exc_info=True)
-			# field_polygon.plot(lw=5,c='r')
-			# self.get_cover_line(field_polygon.cover_line_length).plot(lw=5,c='k')
+			# field_polygon.plot()
 			# plt.show()
+
+			lines=field_polygon.polygon.intersection(some_line)
+		except Exception as exc:
+			simple_logger.exception(str(exc))
+			logger.debug('some_line:\n%s',some_line)
+			logger.debug('field_polygon.polygon:\n%s',field_polygon.polygon)
+
+			field_polygon.plot(lw=5,c='r')
+			self.get_cover_line(field_polygon.cover_line_length).plot(lw=5,c='k')
+			plt.show()
 			# from egistic_navigation.base_geometry.poly_utils import ThePoly
 			# field_polygon:ThePoly=field_polygon
 			# lines=field_polygon.as_valid(field_polygon).polygon.buffer(1).buffer(-1).intersection(self.get_cover_line(field_polygon.cover_line_length).line)
 			raise exc
-			
+
 		if as_the_line:
-			liner=lambda x:TheLine(line=x,width=self.width)
+			liner=functools.partial(TheLine,width=self.width)
 		else:
 			liner=lambda x:x
-		
+
 		if lines.is_empty: return []
 		elif isinstance(lines,shg.MultiLineString):
 			return [liner(x) for x in lines]
+		elif isinstance(lines,shg.LineString):
+			try:
+				return [liner(lines)]
+			except:
+				logger.debug('lines: %s',lines)
+				raise
 		else:
-			return [liner(lines)]
-	
+			raise NotImplementedError(f"type(lines) = {type(lines)}, lines={lines}")
+
 	def reversed(self):
 		return TheLine([self[1],self[0]])
-	
+
 	@property
 	def vector(self):
 		if self._vector is None: self._vector=self[1]-self[0]
 		return self._vector
-	
+
 	@property
 	def unit_vector(self):
 		if self._unit_vector is None: self._unit_vector=self.vector.xy/np.linalg.norm(self.xy)
 		return self._unit_vector
-	
+
 	@property
 	def xy(self):
 		if self._xy is None:
 			self._xy=line_xy(self.line)
 		return self._xy
-	
+
 	@property
 	def slope(self):
 		if self._slope is None:
 			self._slope=1/np.divide(*(self.xy[1,:]-self.xy[0,:]))
 		return self._slope
-	
+
 	@property
 	def perp(self):
 		if self._perp_unit_vector is None:
 			self._perp_unit_vector=perpendicular(normalize(self.xy[1,:]-self.xy[0,:]))
 		return self._perp_unit_vector
-	
+
 	@property
 	def midpoint(self):
 		if self._midpoint is None:
 			self._midpoint=np.sum(self.xy,0)/2
 		return self._midpoint
-	
+
 	@property
 	def line_points(self):
 		return [*self[:],*self.intermediate_points]
-	
+
 	def get_along_normal(self,distance,point_on_line=None):
 		point_on_line=self.midpoint if point_on_line is None else point_on_line
 		return point_on_line+self.perp*distance
-	
+
 	def offset_by(self,distance,count=1):
 		offset_lines=list()
 		for i in range(count):
@@ -165,17 +194,17 @@ class TheLine(GenericGeometry):
 			line=TheLine(coordinates=points,width=self.width)
 			offset_lines.append(line)
 		return offset_lines
-	
+
 	def __eq__(self,other):
 		if np.linalg.norm(self.xy-other.xy)<min_dist or np.linalg.norm(self.xy-other.xy[::-1])<min_dist: return True
 		else: return False
-	
+
 	def touches(self,xy):
 		return self.line.touches(shg.Point(xy))
-	
+
 	def __len__(self):
 		return len(self.xy)
-	
+
 	def __getitem__(self,item):
 		if isinstance(item,slice):
 			return [self[ii] for ii in range(*item.indices(len(self)))]
@@ -183,10 +212,10 @@ class TheLine(GenericGeometry):
 		# simple_logger.debug('item: %s',item)
 		# simple_logger.debug('self.xy[item]: %s',self.xy[item])
 		return ThePoint(self.xy[item])
-	
+
 	def __iter__(self):
 		return iter([self[i] for i in range(2)])
-	
+
 	def extend_from(self,xy,length,show=False,**plot_kwargs):
 		# ThePoint([0,0]).plot('Origin')
 		# target_point=ThePoint(crop_field.xy[0]).plot()
@@ -214,7 +243,7 @@ class TheLine(GenericGeometry):
 			# self.plot(text='The line')
 			# plt.show()
 			raise ValueError(message,dict(xy_point=str(xy_point),the_line=str(self)))
-		
+
 		# simple_logger.debug('target_line.slope: %s',target_line.slope)
 		# simple_logger.debug('self.slope: %s',self.slope)
 		# line_vector.plot('line_vector')
@@ -234,7 +263,7 @@ class TheLine(GenericGeometry):
 		if show: extension_line.plot(**plot_kwargs)
 		# plt.show()
 		return extension_line
-	
+
 	def __contains__(self,item):
 		# simple_logger.debug('item: %s',item)
 		if not isinstance(item,ThePoint): item=ThePoint(item)
@@ -243,10 +272,10 @@ class TheLine(GenericGeometry):
 			# simple_logger.debug('point: %s',point)
 			if point==item: return True
 		return False
-	
+
 	def __hash__(self):
 		return hash(self.geometry)
-	
+
 	@property
 	def angle(self):
 		return np.arctan2(self.vector.y,self.vector.x)*180/np.pi

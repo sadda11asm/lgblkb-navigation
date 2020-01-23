@@ -1,6 +1,4 @@
 from shapely.geometry import box,Polygon,MultiPolygon,GeometryCollection
-from egistic_navigation.global_support import with_logging
-from logging import INFO
 
 def katana(geometry,threshold,count=0):
 	"""Split a Polygon into two parts across it's shortest dimension"""
