@@ -526,12 +526,13 @@ class ThePoly(GenericGeometry):
 	# 	return out
 
 	@simple_logger.wrap()
-	def generate_clusters(self,grid_resolution,n_clusters,show=''):
+	def generate_clusters(self,grid_resolution,n_clusters,show='',random_state=1):
 		# interior_points=self.get_interior_points(distance=grid_resolution)
 		interior_points=self.generate_grid_points(grid_resolution=grid_resolution)
+		logger.debug('len(interior_points): %s',len(interior_points))
 		n_clusters=min(n_clusters,len(interior_points))
 		simple_logger.debug('n_clusters: %s',n_clusters)
-		kmeans=KMeans(n_clusters=n_clusters,random_state=1)
+		kmeans=KMeans(n_clusters=n_clusters,random_state=random_state)
 		kmeans.fit(interior_points)
 		if show:
 			plot_clusters,plot_self=1,0
