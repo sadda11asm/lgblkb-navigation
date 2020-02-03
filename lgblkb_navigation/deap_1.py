@@ -1,9 +1,5 @@
-import os
-import numpy as np
-import pandas as pd
-import itertools
-import collections
 import random
+
 from deap import creator,base,tools,algorithms
 
 creator.create("FitnessMax",base.Fitness,weights=(1.0,))

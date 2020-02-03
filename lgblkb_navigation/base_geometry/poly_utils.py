@@ -1,26 +1,25 @@
 import collections
 import functools
+import gc
 import itertools
 
-import gc
 import more_itertools as mi
 import networkx as nx
 import numpy as np
 import pandas as pd
 from box import Box
+from lgblkb_tools import geometry as gmtr
+from lgblkb_tools import logger
 from matplotlib import pyplot as plt,pyplot
 from matplotlib.patches import PathPatch
 from shapely import geometry as shg,ops as shops
 from sklearn.cluster import KMeans
 
-from egistic_navigation.base_geometry.geom_utils import GenericGeometry,get_from_geojson,line_xy,pathify,is_clockwise,generate_cells,min_dist
-from egistic_navigation.base_geometry.line_utils import TheLine
-from egistic_navigation.base_geometry.point_utils import ThePoint
-from egistic_navigation.global_support import simple_logger
-from egistic_navigation.katana_case import katana
-from egistic_navigation.utils.google_way import SimpleTSP
-from lgblkb_tools import geometry as gmtr
-from egistic_navigation.global_support import logger
+from lgblkb_navigation.base_geometry.geom_utils import GenericGeometry,get_from_geojson,line_xy,pathify,is_clockwise,generate_cells,min_dist
+from lgblkb_navigation.base_geometry.line_utils import TheLine
+from lgblkb_navigation.base_geometry.point_utils import ThePoint
+from lgblkb_navigation.katana_case import katana
+from lgblkb_navigation.utils.google_way import SimpleTSP
 
 class TheNodeView(object):
 
@@ -68,7 +67,7 @@ class ThePoly(GenericGeometry):
 			# self.plot()
 			# plt.show()
 			# raise AssertionError(f"Polygon {self.polygon} is not a valid polygon.")
-			# simple_logger.warning(f"Polygon %s is not a valid polygon.",self.polygon)
+			# logger.warning(f"Polygon %s is not a valid polygon.",self.polygon)
 			pass
 
 		self._xy=None
@@ -122,12 +121,12 @@ class ThePoly(GenericGeometry):
 	@classmethod
 	def synthesize(cls,cities_count,poly_extent=1000,hole_count=0,seed=None,hole_cities_count=None):
 		if seed is None: seed=np.random.randint(0,int(1e6))
-		simple_logger.info('seed: %s',seed)
+		logger.info('seed: %s',seed)
 		np.random.seed(seed)
 		try_count=0
 		while True:
 			try_count+=1
-			simple_logger.debug('Try main_poly: %s',try_count)
+			logger.debug('Try main_poly: %s',try_count)
 			seed=np.random.randint(100000000)
 			try:
 				unholy_field=cls.from_tsp(cities_count=cities_count,seed=seed,city_locator=lambda ps:ps*poly_extent)
@@ -144,13 +143,13 @@ class ThePoly(GenericGeometry):
 					# holy_poly=shg.Polygon(unholy_field.xy,[hole.xy,*map(lambda h:h.xy,holes)])
 					# hole.plot()
 
-					# simple_logger.debug('unholy_field.p.contains(hole.p): %s',unholy_field.p.contains(hole.p))
-					# simple_logger.debug('unholy_field.p.intersects(hole.p): %s',unholy_field.p.intersects(hole.p))
+					# logger.debug('unholy_field.p.contains(hole.p): %s',unholy_field.p.contains(hole.p))
+					# logger.debug('unholy_field.p.intersects(hole.p): %s',unholy_field.p.intersects(hole.p))
 					if not unholy_field.p.contains(hole.p): continue
 
-					# 	simple_logger.debug('Contains!!!')
+					# 	logger.debug('Contains!!!')
 					# if unholy_field.p.intersects(hole.p):
-					# 	simple_logger.debug('Intersects!!!')
+					# 	logger.debug('Intersects!!!')
 					# if (not unholy_field.p.contains(hole.p)) or unholy_field.p.intersects(hole.p):
 					# 	continue
 					# hole.plot()
@@ -158,8 +157,8 @@ class ThePoly(GenericGeometry):
 					# plt.show()
 					hole_friendly=True
 					for other_hole in holes:
-						# simple_logger.debug('other_hole.p.intersects(hole.p):\n%s',other_hole.p.intersects(hole.p))
-						# simple_logger.debug('other_hole.p.within(hole.p):\n%s',other_hole.p.within(hole.p))
+						# logger.debug('other_hole.p.intersects(hole.p):\n%s',other_hole.p.intersects(hole.p))
+						# logger.debug('other_hole.p.within(hole.p):\n%s',other_hole.p.within(hole.p))
 						if other_hole.p.intersects(hole.p) or other_hole.p.within(hole.p):
 							hole_friendly=False
 							break
@@ -174,7 +173,7 @@ class ThePoly(GenericGeometry):
 
 					holy_field=cls(holy_poly,area=holy_poly.area)
 
-					simple_logger.debug('Proper hole created at i = %s',i)
+					logger.debug('Proper hole created at i = %s',i)
 					# holy_field.plot()
 					# unholy_field.plot()
 					# plt.show()
@@ -186,18 +185,18 @@ class ThePoly(GenericGeometry):
 				gc.collect()
 			# if holy_field.is_multilinestring:
 			# 	# holes_current_count+=1
-			# 	# simple_logger.debug('holy_field:\n%s',holy_field)
+			# 	# logger.debug('holy_field:\n%s',holy_field)
 			# 	# the_hole.plot()
 			# 	# unholy_field.plot()
 			# 	# plt.show()
 			# 	# holes.append(the_hole)
-			# 	# simple_logger.debug('Hole %s added.',hole_count)
+			# 	# logger.debug('Hole %s added.',hole_count)
 			# 	# holy_field=cls(shg.Polygon(unholy_field.xy,holes=list(map(lambda x:x.xy,holes))))#.plot(c='r')
 			# 	if len(holy_field.holes)==hole_count:
 			# 		# if holes_current_count==hole_count:
 			# 		return holy_field
 			except Exception as exc:
-				simple_logger.debug('exc:\n%s',exc)
+				logger.debug('exc:\n%s',exc)
 				raise
 				pass
 
@@ -373,9 +372,9 @@ class ThePoly(GenericGeometry):
 				is_ok=True
 				break
 			if not is_ok:
-				simple_logger.critical('self.geometry:\n%s',self.geometry)
+				logger.critical('self.geometry:\n%s',self.geometry)
 				for p in self.points: p.plot()
-				simple_logger.critical('len(self.points): %s',len(self.points))
+				logger.critical('len(self.points): %s',len(self.points))
 				plt.show()
 
 		current_chunk=self.polygon.boundary[0] if self.is_multilinestring else self.polygon.boundary
@@ -390,7 +389,7 @@ class ThePoly(GenericGeometry):
 				else: TheLine(line).plot()
 
 		# TheLine(line=line).plot(**plot_kwargs)
-		# simple_logger.debug('line.xy: %s',line.xy)
+		# logger.debug('line.xy: %s',line.xy)
 		# plt.plot(*line.xy,**plot_kwargs)
 		# plt.plot(*line.parallel_offset(5).xy)
 		return lines
@@ -434,9 +433,9 @@ class ThePoly(GenericGeometry):
 	# 	# plt.show()
 	# 	# if i==0 or i==1:
 	# 	# 	field_line.plot('100',c='magenta',alpha=0.5)
-	# 	# simple_logger.info('counter: %s',counter)
+	# 	# logger.info('counter: %s',counter)
 	# 	fl_counters=[len(x) for x in field_lines_data.values()]
-	# 	simple_logger.debug('# of field lines along borders: %s',fl_counters)
+	# 	logger.debug('# of field lines along borders: %s',fl_counters)
 	#
 	# 	if show:
 	# 		# fig=plt.gcf()
@@ -492,7 +491,7 @@ class ThePoly(GenericGeometry):
 			plt.show()
 		return X
 
-	@simple_logger.wrap()
+	@logger.trace()
 	def katanize(self,threshold,show=0,**kwargs):
 		polygons=katana(self.polygon,threshold)
 		if show:
@@ -525,13 +524,13 @@ class ThePoly(GenericGeometry):
 	# 		pass
 	# 	return out
 
-	@simple_logger.wrap()
+	@logger.trace()
 	def generate_clusters(self,grid_resolution,n_clusters,show='',random_state=1):
 		# interior_points=self.get_interior_points(distance=grid_resolution)
 		interior_points=self.generate_grid_points(grid_resolution=grid_resolution)
 		logger.debug('len(interior_points): %s',len(interior_points))
 		n_clusters=min(n_clusters,len(interior_points))
-		simple_logger.debug('n_clusters: %s',n_clusters)
+		logger.debug('n_clusters: %s',n_clusters)
 		kmeans=KMeans(n_clusters=n_clusters,random_state=random_state)
 		kmeans.fit(interior_points)
 		if show:
@@ -543,7 +542,7 @@ class ThePoly(GenericGeometry):
 				plt.scatter(kmeans.cluster_centers_[:,0],kmeans.cluster_centers_[:,1],c='k')
 		return kmeans.cluster_centers_
 
-	@simple_logger.wrap()
+	@logger.trace()
 	def generate_grid_points(self,grid_resolution):
 		corners=self.bounds_xy[[0,2]]
 		x_grid_info=np.arange(*corners[:,0],step=grid_resolution)
@@ -554,16 +553,16 @@ class ThePoly(GenericGeometry):
 		xy_df=pd.DataFrame(xy_coors,columns=['x','y'])
 		xy_df['inside']=xy_df.apply(lambda coor:self.polygon.contains(shg.Point([coor.x,coor.y])),axis=1)
 		xy_df=xy_df[xy_df['inside']].drop(columns=['inside'])
-		simple_logger.debug('xy_df.shape: %s',xy_df.shape)
+		logger.debug('xy_df.shape: %s',xy_df.shape)
 		return xy_df
 
 	def to_numpy(self,resolution):
-		simple_logger.info('self.lims: %s',self.lims)
+		logger.info('self.lims: %s',self.lims)
 
 		delta=self.lims[1]-self.lims[0]
-		simple_logger.info('delta: %s',delta)
+		logger.info('delta: %s',delta)
 		pixel_count=np.ceil(delta/resolution)[::-1].astype(int)
-		simple_logger.info('pixel_count: %s',pixel_count)
+		logger.info('pixel_count: %s',pixel_count)
 		img_array=np.zeros(shape=pixel_count)
 		interior_points=np.round(self.generate_grid_points(resolution),decimals=1)[:,[1,0]]
 		positions_in_grid=np.floor(interior_points/resolution).astype(int)
@@ -582,17 +581,17 @@ class ThePoly(GenericGeometry):
 		diff_x=x[1:]-x[:-1]
 		sum_y=y[:-1]+y[1:]
 		area=np.sum(diff_x*sum_y)
-		# simple_logger.info('x:\n%s',x)
-		# simple_logger.info('diff_x:\n%s',diff_x)
-		# simple_logger.info('y:\n%s',y)
-		# simple_logger.info('sum_y:\n%s',sum_y)
-		# simple_logger.info('area: %s',area)
+		# logger.info('x:\n%s',x)
+		# logger.info('diff_x:\n%s',diff_x)
+		# logger.info('y:\n%s',y)
+		# logger.info('sum_y:\n%s',sum_y)
+		# logger.info('area: %s',area)
 		if area>0:
 			self._isclockwise=True
 		elif area<0:
 			self._isclockwise=False
 		else:
-			simple_logger.warning('self.polygon:\n%s',self.polygon)
+			logger.warning('self.polygon:\n%s',self.polygon)
 			# self._isclockwise=None
 			self.plot()
 			plt.show()
@@ -603,17 +602,17 @@ class ThePoly(GenericGeometry):
 	def is_ok(self):
 		if self._is_ok is not None: return self._is_ok
 		if not self.is_clockwise:
-			simple_logger.info('self.polygon:\n%s',self.polygon)
-			# simple_logger.info('"self" is clockwise, but should be counter-clockwise')
-			simple_logger.info('"self" is counter-clockwise, but should be clockwise')
+			logger.info('self.polygon:\n%s',self.polygon)
+			# logger.info('"self" is clockwise, but should be counter-clockwise')
+			logger.info('"self" is counter-clockwise, but should be clockwise')
 			self._is_ok=False
 			return self._is_ok
 		for interior in self.polygon.interiors:
 			interior_poly=shg.Polygon(interior)
 			if is_clockwise(interior_poly):
-				simple_logger.info('Interior polygon:\n%s',interior_poly)
-				simple_logger.info('"Interior polygon" is clockwise, but should be counter-clockwise')
-				# simple_logger.info('"Interior polygon" is counter-clockwise, but should be clockwise')
+				logger.info('Interior polygon:\n%s',interior_poly)
+				logger.info('"Interior polygon" is clockwise, but should be counter-clockwise')
+				# logger.info('"Interior polygon" is counter-clockwise, but should be clockwise')
 				self._is_ok=False
 				return self._is_ok
 		self._is_ok=True
@@ -684,7 +683,7 @@ class ThePoly(GenericGeometry):
 			merged_lines.append(line)
 		merged_lines.sort(key=lambda x:x.xy[0])
 		cells=generate_cells(self.polygon,merged_lines)
-		simple_logger.info('len(cells): %s',len(cells))
+		logger.info('len(cells): %s',len(cells))
 		if show:
 			for i,c in enumerate(cells):
 				self.__class__(c.buffer(-0.5)).plot(**dict(dict(c=None,text=str(i)),**plot_kwargs))
@@ -729,11 +728,11 @@ class ThePoly(GenericGeometry):
 	@property
 	def convex_hull(self):
 		if self._convex_hull is None:
-			# simple_logger.debug('self.xy:\n%s',self.xy)
+			# logger.debug('self.xy:\n%s',self.xy)
 			if self.p.convex_hull.is_empty:
 				# self.plot()
 				# plt.show()
-				simple_logger.warning('Empty hull')
+				logger.warning('Empty hull')
 				self._convex_hull=ThePoly(shg.Polygon())
 			else:
 				self._convex_hull=ThePoly(self.p.convex_hull,**self.data)
@@ -782,7 +781,7 @@ class ThePoly(GenericGeometry):
 		G.add_edge(line[0],line[1],line=line)
 		return line
 
-	# @simple_logger.wrap()
+	# @logger.trace()
 	def generate_graph(self,parent_graph=None):
 		G=parent_graph or TheGraph()
 		# vertex_angles=self.get_angles_at_vertices()
@@ -833,7 +832,7 @@ class ThePoly(GenericGeometry):
 			# self.G.add_node(the_point,lines=[l1,l2])
 			intersection_points.append(the_point)
 		# intersection_points=set(intersection_points)
-		simple_logger.info('intersection_points count: %s',len(intersection_points))
+		logger.info('intersection_points count: %s',len(intersection_points))
 		return intersection_points
 
 	def get_angles_at_vertices(self):
@@ -856,7 +855,7 @@ class ThePoly(GenericGeometry):
 		return self._angles_at_vertices
 
 	def __getitem__(self,item):
-		# simple_logger.debug('item: %s',item)
+		# logger.debug('item: %s',item)
 		if type(item) in (np.ndarray,tuple,list):
 			# if isinstance(item,np.ndarray): item=item.ravel()
 			u,v=item

@@ -1,0 +1,32 @@
+[[source]]
+name = "pypi"
+url = "https://pypi.org/simple"
+verify_ssl = true
+
+[dev-packages]
+bumpversion = "*"
+pbr = "*"
+
+[packages]
+lgblkb-tools = "*"
+visilibity = "*"
+requests = "*"
+pillow = "*"
+#deap = "*"
+geoalchemy2 = "*"
+geojson = "*"
+matplotlib = "*"
+more-itertools = "*"
+networkx = "*"
+numpy = "*"
+ortools = "*"
+pandas = "*"
+scipy = "*"
+shapely = "*"
+scikit-learn = "*"
+sortedcontainers = "*"
+typing = "*"
+visvalingamwyatt = "*"
+
+[requires]
+python_version = "3.7"

@@ -1,17 +1,9 @@
-import more_itertools as mi
-import os
-import numpy as np
-import pandas as pd
-import itertools
-import collections
-import ortools
 import matplotlib.pyplot as plt
-import scipy.spatial.distance as scispd
+import numpy as np
 import scipy.spatial as scisp
-from egistic_navigation.global_support import simple_logger
-import egistic_navigation.global_support as gsup
-from ortools.constraint_solver import routing_enums_pb2
+from lgblkb_tools import logger
 from ortools.constraint_solver import pywrapcp
+from ortools.constraint_solver import routing_enums_pb2
 
 """Simple travelling salesman problem between cities."""
 
@@ -41,7 +33,7 @@ class SimpleTSP(object):
 		if assignment:
 			return self.obtain_results(assignment,show=show)
 		else:
-			simple_logger.warning('No solution obtained.')
+			logger.warning('No solution obtained.')
 	
 	def distance_callback(self,from_index,to_index):
 		"""Returns the distance between the two nodes."""
@@ -52,7 +44,7 @@ class SimpleTSP(object):
 	
 	def obtain_results(self,assignment,show=False):
 		"""Prints assignment on console."""
-		# simple_logger.debug('Objective: {} meters'.format(assignment.ObjectiveValue()))
+		# logger.debug('Objective: {} meters'.format(assignment.ObjectiveValue()))
 		index=self.routing.Start(0)
 		plan_output='Route for vehicle 0:\n'
 		route_distance=0
@@ -67,8 +59,8 @@ class SimpleTSP(object):
 			route_distance+=self.routing.GetArcCostForVehicle(previous_index,index,0)
 		# plan_output+=' {}\n'.format(manager.IndexToNode(index))
 		# plan_output+='Route distance: {} meters\n'.format(route_distance)
-		# simple_logger.debug('plan_output:\n%s',plan_output)
-		# simple_logger.debug('nodes:\n%s',nodes)
+		# logger.debug('plan_output:\n%s',plan_output)
+		# logger.debug('nodes:\n%s',nodes)
 		if show:
 			plt.scatter(self.city_coors[:,0],self.city_coors[:,1])
 			# plt.scatter(*depot_point)
@@ -76,12 +68,12 @@ class SimpleTSP(object):
 			plt.show()
 		return nodes
 
-@simple_logger.wrap()
+@logger.trace()
 def main():
 	points=np.random.rand(100,2)*100
 	stsp=SimpleTSP(points)
 	route=stsp.run(depot=0,show=True)
-	simple_logger.debug('points[route]:\n%s',points[route])
+	logger.debug('points[route]:\n%s',points[route])
 
 if __name__=='__main__':
 	main()

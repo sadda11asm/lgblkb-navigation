@@ -1,20 +1,11 @@
-import os
-import uuid
-
 import geojson
 import numpy as np
-import pandas as pd
-import itertools
-import collections
-
 from box import Box
+from lgblkb_tools import logger
 from matplotlib import pyplot as plt
 from matplotlib.path import Path
 from numpy import ones,concatenate,asarray
 from shapely import geometry as shg
-
-from egistic_navigation import global_support as gsup
-from egistic_navigation.global_support import simple_logger
 
 def ring_coding(ob):
 	# The codes will be all "LINETO" commands, except for "MOVETO"s at the
@@ -55,8 +46,8 @@ class GenericGeometry(object):
 	
 	def __init__(self,**data):
 		self.data=Box(data,ordered_box=True)
-		# self.id=uuid.uuid4()
-		
+	
+	# self.id=uuid.uuid4()
 	
 	# def _generate_id(self,id_obj=None):
 	# 	self.id=self.data.pop('id',gsup.get_md5(str(id_obj or self.geometry)))
@@ -65,7 +56,7 @@ class GenericGeometry(object):
 		return f"{self.__class__.__name__}: {self.geometry}"
 	
 	def __getitem__(self,item):
-		# simple_logger.debug('item: %s',item)
+		# logger.debug('item: %s',item)
 		return self.data[item]
 		# raise KeyError('Invalid key provided.',dict(key=item,key_type=type(item)))
 		pass
@@ -136,23 +127,23 @@ def is_clockwise(polygon: shg.Polygon):
 	diff_x=x[1:]-x[:-1]
 	sum_y=y[:-1]+y[1:]
 	area=np.sum(diff_x*sum_y)
-	# simple_logger.info('x:\n%s',x)
-	# simple_logger.info('y:\n%s',y)
-	# simple_logger.info('diff_x:\n%s',diff_x)
-	# simple_logger.info('sum_y:\n%s',sum_y)
-	# simple_logger.info('area: %s',area)
+	# logger.info('x:\n%s',x)
+	# logger.info('y:\n%s',y)
+	# logger.info('diff_x:\n%s',diff_x)
+	# logger.info('sum_y:\n%s',sum_y)
+	# logger.info('area: %s',area)
 	if area>0:
 		__isclockwise=True
 	elif area<0:
 		__isclockwise=False
 	else:
-		simple_logger.info('self.polygon:\n%s',polygon)
+		logger.info('self.polygon:\n%s',polygon)
 		raise NotImplementedError('Area is zero.')
 	return __isclockwise
 
 def cut_polygon(polygon,cut_line):
 	mpoly=polygon.difference(cut_line.buffer(1e-9))
-	# simple_logger.info('mpoly:\n%s',mpoly)
+	# logger.info('mpoly:\n%s',mpoly)
 	return mpoly
 
 def generate_cells(polygon,cutlines):

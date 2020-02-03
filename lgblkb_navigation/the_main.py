@@ -1,30 +1,23 @@
-import shapely.affinity as shaff
-import more_itertools as mi
 import collections
 
-import shapely.geometry as shg
 import matplotlib.pyplot as plt
 import numpy as np
-from geoalchemy2.shape import to_shape
+from lgblkb_tools import logger
 
-import egistic_navigation.global_support as gsup
-import lgblkb_tools.geometry as gmtr
-from egistic_navigation.base_geometry.geom_utils import min_dist
-from egistic_navigation.base_geometry.line_utils import TheLine
-from egistic_navigation.base_geometry.point_utils import ThePoint
-from egistic_navigation.base_geometry.poly_utils import ThePoly
-from egistic_navigation.field_geometry.field_utils import FieldPoly,get_paths
-from egistic_navigation.global_support import simple_logger
+import lgblkb_navigation.global_support as gsup
+from lgblkb_navigation.base_geometry.point_utils import ThePoint
+from lgblkb_navigation.base_geometry.poly_utils import ThePoly
+from lgblkb_navigation.field_geometry.field_utils import FieldPoly
+
 # from lgblkb_tools.db_utils.sqla_orms import Cadastres_Info
-import visvalingamwyatt as vw
 
 def check_cases(seed=None,region_extent=1e6,show=False):
 	for i in range(3,100):
 		if show: plt.clf()
-		simple_logger.info('i: %s',i)
+		logger.info('i: %s',i)
 		crop_field=ThePoly.from_tsp(cities_count=i,seed=seed,region_extent=region_extent)  #.plot()
 		# if not crop_field.p.is_valid:
-		# 	simple_logger.warning('crop_field.p.is_valid: %s',crop_field.p.is_valid)
+		# 	logger.warning('crop_field.p.is_valid: %s',crop_field.p.is_valid)
 		# 	crop_field.plot()
 		# 	plt.text(*ThePoint(crop_field.p.centroid),i)
 		# 	plt.show()
@@ -37,7 +30,7 @@ def check_cases(seed=None,region_extent=1e6,show=False):
 # def choose_cadastres():
 # 	cad_infos=gsup.mgr.session.query(Cadastres_Info).filter(Cadastres_Info.area>1e-3).limit(1000).all()
 # 	for cad_info in cad_infos:
-# 		simple_logger.debug('cad_info:\n%s',cad_info)
+# 		logger.debug('cad_info:\n%s',cad_info)
 # 		sg=gmtr.SpatialGeom(to_shape(cad_info.geom)).convert_crs(4326,3857)
 # 		has_interior=False
 # 		for i in sg.geom_obj[0].interiors:
@@ -67,20 +60,20 @@ class SetOfFields(object):
 	def add(self,*input_fields,solution_cost):
 		# the_field=solution_fields[0]
 		# assert isinstance(the_field,ThePoly),f'{type(the_field)}'
-		# simple_logger.debug('input_fields:\n%s',input_fields)
+		# logger.debug('input_fields:\n%s',input_fields)
 		# for input_field in input_fields:
-		# 	simple_logger.debug('type(input_field): %s',type(input_field))
+		# 	logger.debug('type(input_field): %s',type(input_field))
 		
 		are_subfields_unique=True
 		for solution_fields in self.solutions[solution_cost]:
-			# simple_logger.debug('key: %s',key)
-			# simple_logger.debug('solution_fields:\n%s',solution_fields)
+			# logger.debug('key: %s',key)
+			# logger.debug('solution_fields:\n%s',solution_fields)
 			# for solution_field in solution_fields:
-			# 	simple_logger.debug('type(solution_field): %s',type(solution_field))
-			# 	simple_logger.debug('solution_field:\n%s',solution_field)
+			# 	logger.debug('type(solution_field): %s',type(solution_field))
+			# 	logger.debug('solution_field:\n%s',solution_field)
 			similarity_counter=0
 			for i_subfield,input_field in enumerate(input_fields):
-				# simple_logger.debug('solution_fields: %s',solution_fields)
+				# logger.debug('solution_fields: %s',solution_fields)
 				if input_field in solution_fields:
 					similarity_counter+=1
 			if similarity_counter==len(solution_fields):
@@ -108,20 +101,20 @@ def calculate_field_cost(solution_field,offset_distance,error_cost,show=False):
 		# else: field_cost=len(field_lines)
 		field_cost,_=solution_field.get_min_altitude(use_mp=use_mp)
 	except Exception as exc:
-		simple_logger.warning(str(exc),exc_info=True)
+		logger.warning(str(exc),exc_info=True)
 		# p1.plot()
 		# plt.show()
 		field_cost=error_cost
 	return field_cost
 
-@simple_logger.wrap()
+@logger.trace()
 def get_the_best_solution(crop_field,offset_distance,save_folder,show,):
 	# field_lines=crop_field.get_optimal_field_lines(offset_distance,show=show)
 	# field_lines=crop_field.get_optimal_field_lines(offset_distance,show=show)
 	# single_piece_cost=len(field_lines)
 	single_piece_cost,_=crop_field.get_min_altitude(use_mp=use_mp)
 	min_cost=single_piece_cost
-	simple_logger.info('Single_piece_cost: %s',single_piece_cost)
+	logger.info('Single_piece_cost: %s',single_piece_cost)
 	# filepath=save_folder.get_filepath('initial',single_piece_cost=single_piece_cost,ext='.png')
 	# save_current_figure(filepath,clear_after=clear_figure_after_plot)
 	# if not clear_figure_after_plot: plt.show()
@@ -132,7 +125,7 @@ def get_the_best_solution(crop_field,offset_distance,save_folder,show,):
 	for i_start,start_node in enumerate(crop_field.all_points):
 		for solution_fields in crop_field.get_subfields(start_node,offset_distance=offset_distance,show=show):
 			if len(solution_fields)==1:
-				# simple_logger.info('min_cost: %s',min_cost)
+				# logger.info('min_cost: %s',min_cost)
 				# return min_cost,set_of_fields.solutions[min_cost][0]
 				plt.clf()
 				break
@@ -163,17 +156,17 @@ def get_the_best_solution(crop_field,offset_distance,save_folder,show,):
 			# 	except:
 			# 		remaining_cost=single_piece_cost*2
 			# 	cumulative_cost=p1_cost+remaining_cost
-			simple_logger.debug('cumulative_cost: %s',cumulative_cost)
+			logger.debug('cumulative_cost: %s',cumulative_cost)
 			
 			filepath=save_folder.get_filepath(start_node_index=i_start,cumulative_cost=cumulative_cost,ext='.png',iterated=True)
 			save_current_figure(filepath,clear_after=clear_figure_after_plot)
 			if not clear_figure_after_plot: plt.show()
 			
 			if cumulative_cost<single_piece_cost:
-				simple_logger.info('Another solution found!')
+				logger.info('Another solution found!')
 				if cumulative_cost<min_cost: min_cost=cumulative_cost
 				is_main_field_new=set_of_fields.add(*solution_fields,solution_cost=cumulative_cost)
-				# simple_logger.debug('is_main_field_new: %s',is_main_field_new)
+				# logger.debug('is_main_field_new: %s',is_main_field_new)
 				if is_main_field_new:
 					# for sf in solution_fields: sf.plot()
 					# filepath=save_folder.get_filepath(start_node_index=i_start,cumulative_cost=cumulative_cost,ext='.png')
@@ -184,11 +177,11 @@ def get_the_best_solution(crop_field,offset_distance,save_folder,show,):
 	
 	# if len(save_folder.children())==1: save_folder.delete()
 	
-	simple_logger.info('min_cost: %s',min_cost)
+	logger.info('min_cost: %s',min_cost)
 	
 	return min_cost,set_of_fields.solutions[min_cost][0]
 
-@simple_logger.wrap()
+@logger.trace()
 def save_solution(solution_cost,solution_fields,save_folder,offset_distance,savename='solution'):
 	# plt.clf()
 	for i_solution_field,solution_field in enumerate(solution_fields):
@@ -202,7 +195,7 @@ def save_solution(solution_cost,solution_fields,save_folder,offset_distance,save
 	if not clear_figure_after_plot: plt.show()
 	return filepath
 
-@simple_logger.wrap()
+@logger.trace()
 def search_for_solution(crop_field,offset_distance,save_folder,show):
 	solution_cost,solution_fields=get_the_best_solution(crop_field,offset_distance,save_folder,show=show)
 	
@@ -237,13 +230,13 @@ def search_for_solution(crop_field,offset_distance,save_folder,show):
 def run_single(cities_count,i_field,the_seed):
 	crop_field=FieldPoly.synthesize(cities_count=cities_count,poly_extent=2000,seed=the_seed,
 	                                hole_count=0,hole_cities_count=None)
-	# geojson_path=r'/home/lgblkb/PycharmProjects/egistic_navigation/scripts/nav_test.geojson'
+	# geojson_path=r'/home/lgblkb/PycharmProjects/lgblkb_navigation/scripts/nav_test.geojson'
 	# crop_field=FieldPoly.from_geojson(geojson_path)
 	crop_field.plot()
 	plt.show()
 	crop_field.plot()
 	save_folder=base_folder.create(field=i_field,cities_count=cities_count,the_seed=the_seed)
-	simple_logger.info('save_folder:\n%s',save_folder)
+	logger.info('save_folder:\n%s',save_folder)
 	
 	offset_distance=24
 	show=True
@@ -261,9 +254,9 @@ def run_single(cities_count,i_field,the_seed):
 	
 	solution_cost,solution_fields=search_for_solution(crop_field,offset_distance,save_folder,show,)
 	solution_path=save_solution(solution_cost,solution_fields,save_folder,offset_distance,'final_solution')
-	simple_logger.info('solution_cost: %s',solution_cost)
-	simple_logger.info('Number of generated subfields: %s',len(solution_fields))
-	simple_logger.info('solution_path:\n%s',solution_path)
+	logger.info('solution_cost: %s',solution_cost)
+	logger.info('Number of generated subfields: %s',len(solution_fields))
+	logger.info('solution_path:\n%s',solution_path)
 
 # solution_field,=solution_fields
 # solution_field: FieldPoly=solution_field
@@ -274,14 +267,14 @@ def run_single(cities_count,i_field,the_seed):
 # if not clear_figure_after_plot: plt.show()
 
 
-@simple_logger.wrap()
+@logger.trace()
 def main():
-	# geojson_path=r'/home/lgblkb/PycharmProjects/egistic_navigation/scripts/nav_test.geojson'
+	# geojson_path=r'/home/lgblkb/PycharmProjects/lgblkb_navigation/scripts/nav_test.geojson'
 	# crop_field=FieldPoly.from_geojson(geojson_path)
 	# field_cost,base_line=crop_field.get_min_altitude(use_mp=True)
 	# # crop_field.get_field_lines(12,base_line,show=True)
-	# simple_logger.debug('field_cost: %s',field_cost)
-	# simple_logger.debug('base_line: %s',base_line)
+	# logger.debug('field_cost: %s',field_cost)
+	# logger.debug('base_line: %s',base_line)
 	# crop_field.plot()
 	# base_line.plot(text='base_line')
 	# plt.show()
@@ -305,7 +298,7 @@ def main():
 	#                                       ]]))
 	# crop_field.plot()
 	# cost=crop_field.get_altitude()
-	# simple_logger.debug('cost: %s',cost)
+	# logger.debug('cost: %s',cost)
 	# crop_field=FieldPoly.synthesize(10,2000,0,seed=1234)
 	# return
 	
@@ -329,7 +322,7 @@ def main():
 	# run_single(15,0,93776577)
 	return
 	
-	geojson_path=r'/home/lgblkb/PycharmProjects/egistic_navigation/scripts/nav_test.geojson'
+	geojson_path=r'/home/lgblkb/PycharmProjects/lgblkb_navigation/scripts/nav_test.geojson'
 	crop_field=FieldPoly.from_geojson(geojson_path)
 	crop_field.plot()
 	plt.show()
@@ -337,9 +330,9 @@ def main():
 	offset_distance=24
 	save_folder=base_folder['nav_test']
 	solution_cost,solution_fields,solution_path=search_for_solution(crop_field,offset_distance,save_folder,show,)
-	simple_logger.info('solution_cost: %s',solution_cost)
-	simple_logger.info('Number of generated subfields: %s',len(solution_fields))
-	simple_logger.info('solution_path:\n%s',solution_path)
+	logger.info('solution_cost: %s',solution_cost)
+	logger.info('Number of generated subfields: %s',len(solution_fields))
+	logger.info('solution_path:\n%s',solution_path)
 	return
 	# check_cases(seed=None,region_extent=1e2,show=False)
 	
@@ -347,7 +340,7 @@ def main():
 	# ThePoly(a).plot()
 	# plt.show()
 	#
-	# simple_logger.debug('a:\n%s',a)
+	# logger.debug('a:\n%s',a)
 	#
 	#
 	# return
@@ -410,7 +403,7 @@ def main():
 	# crop_field.generate_adjacency_info()
 	# for l1,l2 in itertools.combinations(crop_field.exterior_lines,2):
 	# 	distance=l1.geometry.distance(l2.geometry)
-	# 	simple_logger.debug('distance: %s',distance)
+	# 	logger.debug('distance: %s',distance)
 	# return
 	# plt.show()
 	# return
@@ -418,9 +411,9 @@ def main():
 	# 	point.plot(i)
 	
 	# for node,neighbors_data in crop_field.G.adjacency():
-	# 	simple_logger.info('node: %s',node)
+	# 	logger.info('node: %s',node)
 	# 	for neighbor_node in neighbors_data:
-	# 		simple_logger.debug('neighbor_node.xy: %s',neighbor_node.xy)
+	# 		logger.debug('neighbor_node.xy: %s',neighbor_node.xy)
 	# 		pass
 	# return
 	# plt.show()
@@ -436,7 +429,7 @@ def main():
 	# 		node.plot(f'{i_main}')
 	# 		neighbor_node.plot(f'{i_main}-{i_neighbor}')
 	# 	plt.show()
-	# 	# simple_logger.debug('neighbor_node.id: %s',neighbor_node.id)
+	# 	# logger.debug('neighbor_node.id: %s',neighbor_node.id)
 	# 	# return
 	# for cities_count in range(10,51,5):
 	pass
@@ -483,15 +476,15 @@ def main():
 	
 	# dist_sorted_lines=sorted(field_lines,lambda line:line.geometry.)
 	
-	# simple_logger.debug('node.xy: %s',node.xy)
+	# logger.debug('node.xy: %s',node.xy)
 	
-	# simple_logger.debug('path:\n%s',path)
+	# logger.debug('path:\n%s',path)
 	
 	# plt.show()
 	
 	# for node,data in crop_field.G.nodes.data():
-	# simple_logger.debug('node: %s',node)
-	# simple_logger.debug('data: %s',data)
+	# logger.debug('node: %s',node)
+	# logger.debug('data: %s',data)
 	# crop_field.get_exterior_lines(show=1)
 	
 	# for point in crop_field.G.nodes[decision_points['inner'][0]]['lines'][1].get_all_points:
@@ -500,29 +493,29 @@ def main():
 	# 	border_line.plot()
 	# pass
 	# for line in crop_field.G.inner_nodes[1,'lines']:
-	# 	# simple_logger.debug('type(line): %s',type(line))
+	# 	# logger.debug('type(line): %s',type(line))
 	# 	line.plot()
-	# simple_logger.debug('line:\n%s',line)
+	# logger.debug('line:\n%s',line)
 	
 	pass
-	# simple_logger.debug('target_line:\n%s',target_line)
-	# simple_logger.debug('lines:\n%s',lines)
+	# logger.debug('target_line:\n%s',target_line)
+	# logger.debug('lines:\n%s',lines)
 	# for i,line in enumerate(lines): line.plot(text=i+1)
 	# node_data=crop_field.G.nodes[crop_field[0][0]]
-	# simple_logger.debug('node_data: %s',node_data)
+	# logger.debug('node_data: %s',node_data)
 	# edge_data=crop_field.G.edges[crop_field[0][0],crop_field[-1][0]]
-	# simple_logger.debug('edge_data: %s',edge_data)
+	# logger.debug('edge_data: %s',edge_data)
 	# edge_data=crop_field.G.edges[crop_field[-1]]
-	# simple_logger.debug('edge_data: %s',edge_data)
+	# logger.debug('edge_data: %s',edge_data)
 	
 	# for key_point in main_decision_points:
 	
-	# simple_logger.debug('main_decision_points:\n%s',main_decision_points)
+	# logger.debug('main_decision_points:\n%s',main_decision_points)
 	pass
 	# plt.show()
 	pass
 	# for i in range(100):
-	# 	simple_logger.debug('i: %s',i)
+	# 	logger.debug('i: %s',i)
 	# 	crop_field=ThePoly.synthesize(cities_count=6,poly_extent=1000,hole_count=0,seed=i).plot()
 	# 	crop_field.get_extension_lines(show=True)
 	#

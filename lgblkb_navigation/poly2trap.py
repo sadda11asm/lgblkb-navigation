@@ -19,7 +19,7 @@ Created on Thu Feb 05 19:43:15 2015
 
 """
 
-from egistic_navigation import seidel
+from lgblkb_navigation import seidel
 import matplotlib.pyplot as plt
 from descartes import PolygonPatch
 from shapely.geometry import Polygon

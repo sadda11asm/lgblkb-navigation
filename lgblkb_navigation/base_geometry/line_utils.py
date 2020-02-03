@@ -1,17 +1,14 @@
-import collections
 import functools
 
 import numpy as np
+from lgblkb_tools import geometry as gmtr
+from lgblkb_tools import logger
 from matplotlib import pyplot as plt
 from shapely import geometry as shg
-
-from egistic_navigation.base_geometry.geom_utils import GenericGeometry,line_xy,perpendicular,normalize,min_dist
-from egistic_navigation.base_geometry.point_utils import ThePoint
-
-from egistic_navigation.global_support import simple_logger
-from egistic_navigation.global_support import logger
-from lgblkb_tools import geometry as gmtr
 from sortedcontainers import SortedDict
+
+from lgblkb_navigation.base_geometry.geom_utils import GenericGeometry,line_xy,perpendicular,normalize,min_dist
+from lgblkb_navigation.base_geometry.point_utils import ThePoint
 
 class TheLine(GenericGeometry):
 
@@ -113,14 +110,14 @@ class TheLine(GenericGeometry):
 
 			lines=field_polygon.polygon.intersection(some_line)
 		except Exception as exc:
-			simple_logger.exception(str(exc))
+			logger.exception(str(exc))
 			logger.debug('some_line:\n%s',some_line)
 			logger.debug('field_polygon.polygon:\n%s',field_polygon.polygon)
 
 			field_polygon.plot(lw=5,c='r')
 			self.get_cover_line(field_polygon.cover_line_length).plot(lw=5,c='k')
 			plt.show()
-			# from egistic_navigation.base_geometry.poly_utils import ThePoly
+			# from lgblkb_navigation.base_geometry.poly_utils import ThePoly
 			# field_polygon:ThePoly=field_polygon
 			# lines=field_polygon.as_valid(field_polygon).polygon.buffer(1).buffer(-1).intersection(self.get_cover_line(field_polygon.cover_line_length).line)
 			raise exc
@@ -208,9 +205,9 @@ class TheLine(GenericGeometry):
 	def __getitem__(self,item):
 		if isinstance(item,slice):
 			return [self[ii] for ii in range(*item.indices(len(self)))]
-		# simple_logger.debug('self.xy: %s',self.xy)
-		# simple_logger.debug('item: %s',item)
-		# simple_logger.debug('self.xy[item]: %s',self.xy[item])
+		# logger.debug('self.xy: %s',self.xy)
+		# logger.debug('item: %s',item)
+		# logger.debug('self.xy[item]: %s',self.xy[item])
 		return ThePoint(self.xy[item])
 
 	def __iter__(self):
@@ -238,14 +235,14 @@ class TheLine(GenericGeometry):
 			_power=1
 		else:
 			message='xy_point does not correspond to any of the line vertices.'
-			simple_logger.error(message)
+			logger.error(message)
 			# xy_point.plot('xy_point')
 			# self.plot(text='The line')
 			# plt.show()
 			raise ValueError(message,dict(xy_point=str(xy_point),the_line=str(self)))
 
-		# simple_logger.debug('target_line.slope: %s',target_line.slope)
-		# simple_logger.debug('self.slope: %s',self.slope)
+		# logger.debug('target_line.slope: %s',target_line.slope)
+		# logger.debug('self.slope: %s',self.slope)
 		# line_vector.plot('line_vector')
 		# target_point.plot('Target')
 		# self[0].plot('Start')
@@ -265,11 +262,11 @@ class TheLine(GenericGeometry):
 		return extension_line
 
 	def __contains__(self,item):
-		# simple_logger.debug('item: %s',item)
+		# logger.debug('item: %s',item)
 		if not isinstance(item,ThePoint): item=ThePoint(item)
 		for point in self[:]:
-			# simple_logger.debug('type(point): %s',type(point))
-			# simple_logger.debug('point: %s',point)
+			# logger.debug('type(point): %s',type(point))
+			# logger.debug('point: %s',point)
 			if point==item: return True
 		return False
 

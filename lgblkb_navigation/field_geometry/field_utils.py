@@ -1,35 +1,27 @@
-import shapely.wkt as shwkt
-import more_itertools as mi
-# from wrapt_timeout_decorator import timeout
-import visilibity as vis
-import visilibity
-import xxhash
-import functools
-
-import networkx as nx
-import shapely.affinity as shaff
-import matplotlib.pyplot as plt
 import collections
 import itertools
 
-import shapely.geometry as shg
-from box import Box
-from lgblkb_tools.global_support import ParallelTasker
-
-from egistic_navigation.base_geometry.geom_utils import min_dist
-from egistic_navigation.base_geometry.line_utils import TheLine
-from egistic_navigation.base_geometry.point_utils import ThePoint
-from egistic_navigation.base_geometry.poly_utils import ThePoly,TheChunk
-from egistic_navigation.global_support import simple_logger
+import matplotlib.pyplot as plt
+import more_itertools as mi
 import numpy as np
-from egistic_navigation import global_support as gsup
-import logging
+import shapely.affinity as shaff
+import shapely.geometry as shg
+# from wrapt_timeout_decorator import timeout
+import visilibity as vis
+from box import Box
+from lgblkb_tools import logger
+from lgblkb_tools.common.utils import ParallelTasker
+
+from lgblkb_navigation.base_geometry.geom_utils import min_dist
+from lgblkb_navigation.base_geometry.line_utils import TheLine
+from lgblkb_navigation.base_geometry.point_utils import ThePoint
+from lgblkb_navigation.base_geometry.poly_utils import ThePoly,TheChunk
 
 path_width=12
 dfs_threshold=45
 search_loop_limit=3e5
 workers_count=None
-logger=simple_logger
+logger=logger
 epsilon=1e-7
 
 MinCoster=collections.namedtuple('MinCoster',['cost','base_line','width_height_ratio'])
@@ -48,23 +40,23 @@ class FieldPoly(ThePoly):
 	# 	G.add_node(node,lines=parent_lines)
 	# 	return node
 	
-	@simple_logger.wrap()
+	@logger.trace()
 	def get_extension_lines(self,parent=None,show=False):
 		the_main_poly=parent or self  #ThePoly(self.p)#self
 		if self.is_convex and not self.is_multilinestring:
-			simple_logger.info('The field is convex. Extension lines are absent.')
+			logger.info('The field is convex. Extension lines are absent.')
 			return []
 		
 		delta=self.convex_hull.p.difference(self.p)
 		if delta.is_empty:
-			simple_logger.info('Delta is empty. Skipping.')
+			logger.info('Delta is empty. Skipping.')
 			return []
 		elif isinstance(delta,shg.MultiPolygon):
 			chunks=[TheChunk(x,self,id=f'Chunk-{i}') for i,x in enumerate(delta)]
 		elif isinstance(delta,shg.Polygon):
 			chunks=[TheChunk(delta,self)]
 		else:
-			simple_logger.critical('delta: %s',delta)
+			logger.critical('delta: %s',delta)
 			# self.plot()
 			# self.convex_hull.plot(c='b')
 			# plt.show()
@@ -77,15 +69,15 @@ class FieldPoly(ThePoly):
 			convex_chunk=the_chunk.convex_hull  #.plot(c='b',lw=0.5,ls='--',text=f'convex_chunk-{i_chunk}')
 			for i_point,xy in enumerate(the_chunk.xy[:-1]):
 				xy_point=ThePoint(xy,)  #.plot(f'{i_point}')
-				# simple_logger.debug('Point-%s',i_point)
+				# logger.debug('Point-%s',i_point)
 				# the_chunk.baseline.plot(c='r')
 				# if i_point==5:
-				# 	simple_logger.warning('i_point: %s',i_point)
-				# 	simple_logger.debug('convex_chunk.touches(xy): %s',convex_chunk.touches(xy))
+				# 	logger.warning('i_point: %s',i_point)
+				# 	logger.debug('convex_chunk.touches(xy): %s',convex_chunk.touches(xy))
 				if the_chunk.touches_parent and (not convex_chunk.touches(xy) or xy_point in the_chunk.baseline): continue
 				
 				# if not the_chunk.touches_parent or (convex_chunk.touches(xy) and not xy_point in the_chunk.baseline):
-				# simple_logger.info('Point-%s',i_point)
+				# logger.info('Point-%s',i_point)
 				# extension_lines=the_chunk[xy]['extension_lines']=the_main_poly[xy]['extension_lines']=list()
 				extension_lines=the_main_poly[xy]['extension_lines']=list()
 				for chunk_line in the_chunk[xy]['lines']:
@@ -97,7 +89,7 @@ class FieldPoly(ThePoly):
 					# plt.show()
 					
 					cropped_line=the_main_poly.p.intersection(extension_line.line)
-					# simple_logger.debug('cropped_line:\n%s',cropped_line)
+					# logger.debug('cropped_line:\n%s',cropped_line)
 					if isinstance(cropped_line,shg.LineString):
 						pass
 					elif isinstance(cropped_line,shg.MultiLineString):
@@ -131,11 +123,11 @@ class FieldPoly(ThePoly):
 					if not xy_point in cropped_extension_line: continue
 					
 					if cropped_extension_line.line.length<1e-3:
-						simple_logger.warning('Too short extension line encountered.')
+						logger.warning('Too short extension line encountered.')
 					
 					extension_lines.append(cropped_extension_line)
 					if cropped_extension_line in out_extension_lines:
-						simple_logger.warning('Duplicate extension line detected. Skipping.')
+						logger.warning('Duplicate extension line detected. Skipping.')
 						continue
 					out_extension_lines.append(cropped_extension_line)
 			
@@ -153,7 +145,7 @@ class FieldPoly(ThePoly):
 					smaller_chunk=ThePoly(geom_obj)  #.plot(text='ThePoly',c='r')
 					smaller_chunks.append(smaller_chunk)
 				else:
-					simple_logger.debug('geom_obj: %s',geom_obj)
+					logger.debug('geom_obj: %s',geom_obj)
 					raise NotImplementedError
 			
 			for i_smaller_chunk,smaller_chunk in enumerate(smaller_chunks):
@@ -162,7 +154,7 @@ class FieldPoly(ThePoly):
 					# the_chunk.plot(f'the_chunk-{i_chunk}')
 					# smaller_chunk.plot('smaller_chunk',c='r',lw=0.3)
 					# smaller_chunk.id="_".join(map(str,[self.id,'smaller_chunk']))
-					# simple_logger.debug('smaller_chunk:\n%s',smaller_chunk)
+					# logger.debug('smaller_chunk:\n%s',smaller_chunk)
 					smaller_chunk_extension_lines=FieldPoly(smaller_chunk).get_extension_lines(parent=the_main_poly)
 					out_extension_lines.extend(smaller_chunk_extension_lines)
 		
@@ -183,7 +175,7 @@ class FieldPoly(ThePoly):
 		if show:
 			for ext_line in out_extension_lines:
 				ext_line.plot()
-		simple_logger.debug('Extension lines count: %s',len(out_extension_lines))
+		logger.debug('Extension lines count: %s',len(out_extension_lines))
 		return out_extension_lines
 	
 	@property
@@ -201,12 +193,12 @@ class FieldPoly(ThePoly):
 		return self
 	
 	def generate_decision_points(self,show=False):
-		simple_logger.debug('all_points count: %s',len(self.all_points))
+		logger.debug('all_points count: %s',len(self.all_points))
 		extension_points={x[1]:x for x in self.extension_lines}
-		simple_logger.debug('extension_points count: %s',len(extension_points))
+		logger.debug('extension_points count: %s',len(extension_points))
 		
 		border_points=[*self.all_points,*extension_points]
-		simple_logger.info('border_points count: %s',len(border_points))
+		logger.info('border_points count: %s',len(border_points))
 		
 		# inner_points=self.generate_intersection_points(self.extension_lines)
 		
@@ -218,10 +210,10 @@ class FieldPoly(ThePoly):
 		decision_points['all']=border_points
 		
 		if len(decision_points['all'])!=len(set(decision_points['all'])):
-			simple_logger.warning('Mergeable points detected.')
+			logger.warning('Mergeable points detected.')
 		
 		# decision_points=set(decision_points)
-		simple_logger.info('decision_points count: %s',len(decision_points['all']))
+		logger.info('decision_points count: %s',len(decision_points['all']))
 		self.G.decision_points=self.data.decision_points=decision_points
 		# self.data.decision_points=decision_points
 		if show:
@@ -294,10 +286,10 @@ class FieldPoly(ThePoly):
 		# sorted_points=sorted(mi.flatten(map(lambda h:h.points,crop_field.holes)),key=lambda p:p.x)
 		sorted_points=sorted(crop_field.all_points,key=lambda p:p.x)
 		for i_point,point in enumerate(sorted_points[1:],start=1):
-			# if point.x==sorted_points[i_point-1].x: simple_logger.warning('Points have same x vallues!!!. Wrong altitude!')
+			# if point.x==sorted_points[i_point-1].x: logger.warning('Points have same x vallues!!!. Wrong altitude!')
 			
 			if show: point.plot(f'P-{i_point}')
-			# simple_logger.debug('factor: %s',factor)
+			# logger.debug('factor: %s',factor)
 			altitude+=factor*(point.x-sorted_points[i_point-1].x)
 			neighbors=adjacency_data[point]
 			if all(map(lambda n:n.x>point.x,neighbors)):
@@ -306,15 +298,15 @@ class FieldPoly(ThePoly):
 				factor-=1
 		
 		if factor!=0:
-			simple_logger.warning('Final factor value is not 0, but %s',factor)
-		# simple_logger.debug('altitude: %s',altitude)
+			logger.warning('Final factor value is not 0, but %s',factor)
+		# logger.debug('altitude: %s',altitude)
 		return altitude
 	
 	def get_min_altitude(self,use_mp=False):
 		if use_mp:
 			alt_getter=lambda _exterior_line:(
 				FieldPoly(shaff.rotate(self.geometry,180-_exterior_line.angle,_exterior_line[0].geometry)).get_altitude(),_exterior_line)
-			altitude_data=gsup.ParallelTasker(alt_getter).set_run_params(_exterior_line=self.all_lines).run(sleep_time=1e-4)
+			altitude_data=ParallelTasker(alt_getter).set_run_params(_exterior_line=self.all_lines).run(sleep_time=1e-4)
 			min_altitude,base_line=sorted(altitude_data,key=lambda d:d[0])[0]
 		else:
 			base_line=None
@@ -329,9 +321,9 @@ class FieldPoly(ThePoly):
 		# min_costing_rotated_field.plot()
 		# exterior_line.plot(c='r')
 		# exterior_line[0].plot('P')
-		# simple_logger.debug('exterior_line.angle: %s',exterior_line.angle)
+		# logger.debug('exterior_line.angle: %s',exterior_line.angle)
 		# plt.show()
-		simple_logger.a().debug('min_altitude: %s',min_altitude).s()
+		logger.a().debug('min_altitude: %s',min_altitude).s()
 		self.data.base_line=base_line
 		return min_altitude,base_line
 		pass
@@ -367,12 +359,12 @@ class FieldPoly(ThePoly):
 	# 		non_collinear_field=self.as_noncollinear().plot()
 	# 		for i_exterior_line,exterior_line in enumerate(non_collinear_field.exterior_lines):
 	# 			exterior_line.plot()
-	# 			# simple_logger.debug('exterior_line.angle:\n%s',exterior_line.angle)
-	# 			# simple_logger.debug('field_lines[0].angle:\n%s',field_lines[0].angle)
+	# 			# logger.debug('exterior_line.angle:\n%s',exterior_line.angle)
+	# 			# logger.debug('field_lines[0].angle:\n%s',field_lines[0].angle)
 	# 			angle_diff=abs(exterior_line.angle-field_lines[0].angle)
-	# 			# simple_logger.debug('angle_diff: %s',angle_diff)
+	# 			# logger.debug('angle_diff: %s',angle_diff)
 	# 			if angle_diff<min_dist or abs(180-angle_diff)<min_dist:
-	# 				# simple_logger.debug('angle_diff: %s',angle_diff)
+	# 				# logger.debug('angle_diff: %s',angle_diff)
 	# 				border_index=i_exterior_line
 	# 				baseline=non_collinear_field.exterior_lines[border_index]
 	# 				_lines=baseline.get_field_lines(self)
@@ -383,7 +375,7 @@ class FieldPoly(ThePoly):
 	#
 	# 		if with_baseline: assert baseline is not None
 	# 	# fl_counters=[len(x) for x in sorted_field_lines]
-	# 	# simple_logger.debug('# of field lines along borders: %s',fl_counters)
+	# 	# logger.debug('# of field lines along borders: %s',fl_counters)
 	#
 	# 	if show:
 	# 		for i,field_line in enumerate(field_lines):
@@ -453,7 +445,7 @@ class FieldPoly(ThePoly):
 					break
 			
 			if counter!=1:
-				simple_logger.warning('counter: %s',counter)
+				logger.warning('counter: %s',counter)
 		
 		# else:
 		# 	if abs((_parent_line.angle+180)%180-(base_line.angle+180)%180)<min_dist:
@@ -470,7 +462,7 @@ class FieldPoly(ThePoly):
 	
 	def get_subfields(self,start_node,offset_distance,show=False):
 		#adjacency_data={n:set(node_data) for n,node_data in self.G.adjacency()}
-		# simple_logger.debug('len(adjacency_data): %s',len(adjacency_data))
+		# logger.debug('len(adjacency_data): %s',len(adjacency_data))
 		
 		self.add_angle_info()
 		previous_subfields=list()
@@ -485,7 +477,7 @@ class FieldPoly(ThePoly):
 			for previous_subfield in previous_subfields:
 				if subfield==previous_subfield:
 					is_seen=True
-					# simple_logger.info('is_seen: %s',is_seen)
+					# logger.info('is_seen: %s',is_seen)
 					break
 			if is_seen: break
 			previous_subfields.append(subfield)
@@ -509,7 +501,7 @@ class FieldPoly(ThePoly):
 					continue
 				remaining_field=remaining_polys[0]
 			else:
-				# simple_logger.debug('diff_result:\n%s',diff_result)
+				# logger.debug('diff_result:\n%s',diff_result)
 				remaining_field=FieldPoly.as_valid(diff_result)  #.plot(c='g')
 			
 			for hole in self.holes:
@@ -545,12 +537,12 @@ class FieldPoly(ThePoly):
 			
 			yield outputs
 			# for line in raw_poly.exterior_lines:
-			# 	simple_logger.debug('line.angle: %s',line.angle)
+			# 	logger.debug('line.angle: %s',line.angle)
 			# for l1,l2 in itertools.combinations(raw_poly.exterior_lines,2):
 			#
 			# 	result=l1.geometry.distance(l2.geometry)==0 and abs(l1.angle-l2.angle)<min_dist
 			# 	if result:
-			# 		simple_logger.info('l1.angle: %s',l1.angle)
+			# 		logger.info('l1.angle: %s',l1.angle)
 			# 		self.plot()
 			# 		raw_poly.plot(lw=5,c='r')
 			# 		l1.plot(text='L1')
@@ -572,15 +564,15 @@ class FieldPoly(ThePoly):
 			pass
 	
 	def play_with_sub_field(self,p1,field_lines,start,):
-		# simple_logger.warning('border_index:\n%s',border_index)
+		# logger.warning('border_index:\n%s',border_index)
 		field_lines=sorted(field_lines,key=lambda _line:_line.geometry.distance(start.geometry))
 		first_field_line=TheLine(sorted(field_lines[0][:],key=lambda p:p.geometry.distance(start.geometry)))
-		# simple_logger.debug('first_field_line.angle: %s',first_field_line.angle)
+		# logger.debug('first_field_line.angle: %s',first_field_line.angle)
 		
 		start_side_points=list()
 		
 		for i,field_line in enumerate(field_lines):
-			# simple_logger.debug('field_line.angle: %s',field_line.angle)
+			# logger.debug('field_line.angle: %s',field_line.angle)
 			if abs(field_line.angle-first_field_line.angle)<min_dist:
 				start_side_points.append(field_line[0])
 			else:
@@ -599,15 +591,15 @@ class FieldPoly(ThePoly):
 							actual_exterior_line.plot(c='k')
 		
 		for point in p1.points:
-			point.plot(c='k')  # simple_logger.warning('border_index:\n%s',border_index)
+			point.plot(c='k')  # logger.warning('border_index:\n%s',border_index)
 		field_lines=sorted(field_lines,key=lambda _line:_line.geometry.distance(start.geometry))
 		first_field_line=TheLine(sorted(field_lines[0][:],key=lambda p:p.geometry.distance(start.geometry)))
-		# simple_logger.debug('first_field_line.angle: %s',first_field_line.angle)
+		# logger.debug('first_field_line.angle: %s',first_field_line.angle)
 		
 		start_side_points=list()
 		
 		for i,field_line in enumerate(field_lines):
-			# simple_logger.debug('field_line.angle: %s',field_line.angle)
+			# logger.debug('field_line.angle: %s',field_line.angle)
 			if abs(field_line.angle-first_field_line.angle)<min_dist:
 				start_side_points.append(field_line[0])
 			else:
@@ -639,7 +631,7 @@ class FieldPoly(ThePoly):
 				offset_line.plot(c='gray')
 		return offset_lines
 	
-	# @simple_logger.wrap()
+	# @logger.trace()
 	def get_cost(self,linewidth):
 		total_cost=0
 		xy=self.xy[:-1]
@@ -729,7 +721,7 @@ class FieldPoly(ThePoly):
 	def area_cost_ratio(self):
 		return self.geometry.area/self.get_min_cost(path_width).cost
 	
-	@simple_logger.wrap()
+	@logger.trace()
 	def get_subparcel_centers(self,parcel_area,random_state=123,show='',grid_factor=0.1):
 		n_clusters=int(self.p.area/parcel_area)
 		logger.debug('n_clusters: %s',n_clusters)
@@ -766,20 +758,20 @@ def get_shortest_path_length(env,observer,end):
 # 	while_counter=itertools.count()
 # 	while stack:
 # 		next_while_counter=next(while_counter)
-# 		# simple_logger.debug('next_while_counter: %s',next_while_counter)
+# 		# logger.debug('next_while_counter: %s',next_while_counter)
 #
 # 		(vertex,path)=stack.pop()
 # 		for_counter=itertools.count()
 # 		for next_node in graph[vertex]-set(path):
 # 			next_for_counter=next(for_counter)
-# 			# simple_logger.debug('next_for_counter: %s',next_for_counter)
+# 			# logger.debug('next_for_counter: %s',next_for_counter)
 # 			the_path=path+[next_node]
 # 			path_length=len(the_path)
 # 			if path_length>2:
 # 				the_poly=ThePoly(the_path)
 # 				# the_poly.plot()
 # 				# plt.show()
-# 				# simple_logger.debug('the_poly.geometry.area: %s',the_poly.geometry.area)
+# 				# logger.debug('the_poly.geometry.area: %s',the_poly.geometry.area)
 # 				if not the_poly.is_convex:
 # 					continue
 # 				if next_node==goal:
@@ -798,13 +790,13 @@ def dfs_paths_old(field_poly: FieldPoly,graph,start,):
 		while_counter=itertools.count()
 		while stack:
 			next_while_counter=next(while_counter)
-			# simple_logger.debug('next_while_counter: %s',next_while_counter)
+			# logger.debug('next_while_counter: %s',next_while_counter)
 			
 			(vertex,path)=stack.pop()
 			for_counter=itertools.count()
 			for next_node in graph[vertex]-set(path):
 				next_for_counter=next(for_counter)
-				# simple_logger.debug('next_for_counter: %s',next_for_counter)
+				# logger.debug('next_for_counter: %s',next_for_counter)
 				the_path=path+[next_node]
 				path_length=len(the_path)
 				if path_length>2:
@@ -818,17 +810,17 @@ def dfs_paths_old(field_poly: FieldPoly,graph,start,):
 							break
 					# the_poly.plot()
 					# plt.show()
-					# simple_logger.debug('the_poly.geometry.area: %s',the_poly.geometry.area)
-					# simple_logger.debug('contains_hole: %s',contains_hole)
-					# simple_logger.debug('the_poly.is_convex: %s',the_poly.is_convex)
+					# logger.debug('the_poly.geometry.area: %s',the_poly.geometry.area)
+					# logger.debug('contains_hole: %s',contains_hole)
+					# logger.debug('the_poly.is_convex: %s',the_poly.is_convex)
 					if contains_hole or (the_poly.geometry.area>min_dist and not the_poly.is_convex):
 						continue
 					# field_poly.plot()
 					# the_poly.plot()
 					# plt.show()
-					# simple_logger.debug('next_node:\n%s',next_node)
-					# simple_logger.debug('goal:\n%s',goal)
-					# simple_logger.warning('path_length: %s',path_length)
+					# logger.debug('next_node:\n%s',next_node)
+					# logger.debug('goal:\n%s',goal)
+					# logger.warning('path_length: %s',path_length)
 					if next_node==goal:
 						if the_poly.geometry.area>min_dist:
 							yield the_path
@@ -1001,7 +993,7 @@ def decompose_from_points(field_poly: FieldPoly,points=None,use_mp=False,show=Fa
 	logger.debug('Starting area_cost_ratio: %s',max_acr)
 	points=field_poly.get_outer_points() if points is None else points
 	if use_mp:
-		chunks_of_polygons=gsup.ParallelTasker(decompose_from_point,field_poly,show=show)\
+		chunks_of_polygons=ParallelTasker(decompose_from_point,field_poly,show=show)\
 			.set_run_params(some_point=points)\
 			.run(workers_count=workers_count)
 		for res_polygons in chunks_of_polygons:
@@ -1026,7 +1018,7 @@ def perform_optimization(field_poly,use_mp=False):
 	if use_mp:
 		if not len(polygons[1:])==0:
 			chunks_of_optimum_sub_polygons=mi.flatten(
-				gsup.ParallelTasker(perform_optimization).set_run_params(field_poly=polygons[1:]).run(len(polygons[1:])))
+				ParallelTasker(perform_optimization).set_run_params(field_poly=polygons[1:]).run(len(polygons[1:])))
 			optimum_polygons.extend(chunks_of_optimum_sub_polygons)
 		pass
 	else:
@@ -1044,9 +1036,9 @@ def get_field_lines_count(field_poly: FieldPoly,show=False):
 	# if show: field_poly.plot(text=f'{len(field_lines)}')
 	return len(field_lines)
 
-@simple_logger.wrap()
+@logger.trace()
 def main():
-	figs_folder=gsup.project_folder['figures']
+	# figs_folder=gsup.project_folder['figures']
 	# line=shwkt.loads(r'LINESTRING (-234.4914503931494 64.05445361575346, 1555.421523437801 707.7923809846424)')
 	# poly=shwkt.loads(r'POLYGON ((858.0445350926536 436.2787595905871, 874.1837236739181 456.4105901811055, 452.3998231233589 304.7170174165853, 278.4614376825613 242.1604923952041, 273.7995111651426 240.4838416542209, 105.1701033341294 179.8366777542666, 231.290717671669 252.1233683921036, 360.1479755206071 325.9785805910953, 782.4561646582736 568.0267309459517, 963.0932243188652 567.3152367102089, 858.0445350926536 436.2787595905871))')
 	# FieldPoly.as_valid(poly).plot()
@@ -1093,7 +1085,7 @@ def main():
 				                          parcel_area=parcel_area/1e4,
 				                          ext='.png',iterated=True))
 				plt.clf()
-			# plt.show()
+		# plt.show()
 	return
 	# field_poly=FieldPoly.synthesize(cities_count=20,seed=575595)
 	for i in range(100):
