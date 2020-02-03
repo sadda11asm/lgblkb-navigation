@@ -1,0 +1,17 @@
+CHANGES
+=======
+
+v0.0.2
+------
+
+* Bump version: 0.0.1 → 0.0.2
+* Updated requirements.txt
+* Transformation to python module
+* Added get\_subparcel\_centers method to FieldPoly
+* Opasnyi commit
+* Commit before refresh
+* Update
+* Reorganization to separate geoemtry code from field code
+* Case 1
+* first commit?)
+* Initial commit
