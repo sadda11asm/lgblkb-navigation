@@ -1,6 +1,13 @@
 CHANGES
 =======
 
+v0.0.3
+------
+
+* Bump version: 0.0.2 → 0.0.3
+* Added AUTHORS and ChangeLog
+* Transformation to python module
+
 v0.0.2
 ------
 
