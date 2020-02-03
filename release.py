@@ -23,6 +23,7 @@ def main():
 	steps.append('pip install --no-cache-dir lgblkb-navigation -U')
 	steps.append('pip install --no-cache-dir lgblkb-navigation -U')
 	# steps.append('git push')
+	
 	run_cmd(steps)
 	
 
