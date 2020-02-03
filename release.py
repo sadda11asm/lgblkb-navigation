@@ -22,7 +22,7 @@ def main():
 	steps.append('twine upload dist/* || true')
 	steps.append('pip install --no-cache-dir lgblkb-navigation -U')
 	steps.append('pip install --no-cache-dir lgblkb-navigation -U')
-	steps.append('git push')
+	# steps.append('git push')
 	run_cmd(steps)
 
 if __name__=='__main__':
