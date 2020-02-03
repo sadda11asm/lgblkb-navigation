@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "7b60e50516fa9f45dac6d205800ea1c9deb639d36710c027cbc2caf4f6d7517a"
+            "sha256": "abb12f5ac00eb3e957dc28eec90e53a5b247aa554f7e854b606dab7450f11b5d"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -138,6 +138,7 @@
             "hashes": [
                 "sha256:c076429a20d985bc955b3cf195254ac14f89b3bdd4cb02e9c3c593305049d499"
             ],
+            "index": "pypi",
             "version": "==2.4.3"
         },
         "geoalchemy2": {

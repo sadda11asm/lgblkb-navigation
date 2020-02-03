@@ -28,6 +28,7 @@ scikit-learn = "*"
 sortedcontainers = "*"
 typing = "*"
 visvalingamwyatt = "*"
+gdal = "==2.4.3"
 
 [requires]
 python_version = "3.7"
