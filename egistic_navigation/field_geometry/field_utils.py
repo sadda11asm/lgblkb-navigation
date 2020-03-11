@@ -1,3 +1,4 @@
+import geopandas
 import shapely.wkt as shwkt
 import more_itertools as mi
 # from wrapt_timeout_decorator import timeout
@@ -5,6 +6,7 @@ import visilibity as vis
 import visilibity
 import xxhash
 import functools
+from area import area
 
 import networkx as nx
 import shapely.affinity as shaff
@@ -731,7 +733,12 @@ class FieldPoly(ThePoly):
 	
 	@simple_logger.wrap()
 	def get_subparcel_centers(self,parcel_area,random_state=123,show='',grid_factor=0.1):
-		n_clusters=int(self.p.area/parcel_area)
+		area = self.calculate_area()
+		# logger.debug('previous_area:\n%s', self.p.area)
+		# logger.debug('area:\n%s', area)
+		n_clusters=int(area/parcel_area)
+		if int(area) % int(parcel_area) != 0:
+			n_clusters+=1
 		logger.debug('n_clusters: %s',n_clusters)
 		if n_clusters==0: raise NotImplementedError()
 		cluster_centers=self.generate_clusters(grid_resolution=np.sqrt(parcel_area)*grid_factor,
@@ -740,6 +747,16 @@ class FieldPoly(ThePoly):
 		                                       show=show)
 		# logger.debug('cluster_centers:\n%s',cluster_centers)
 		return cluster_centers
+
+	def calculate_area(self):
+		s = geopandas.GeoSeries(self.p)
+		s.crs = f"EPSG:{3857}"
+		s = s.to_crs(epsg=4326)
+		poly = s.geometry[0].exterior
+		coords = list(poly.coords)
+		obj = {'type': 'Polygon', 'coordinates': [coords]}
+		return area(obj)
+
 
 def get_vis_poly(polygon: FieldPoly):
 	return vis.Polygon([vis.Point(*xy) for xy in polygon.xy[:-1]])

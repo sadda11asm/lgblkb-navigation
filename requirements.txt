@@ -1,3 +1,6 @@
+geopandas
+area
+pyproj
 visilibity
 requests==2.22.0
 Pillow==6.1.0
